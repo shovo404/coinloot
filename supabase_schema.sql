@@ -2064,18 +2064,18 @@ alter table public.ip_logs enable row level security;
 create policy "Admins can read vpn_detection_logs" on public.vpn_detection_logs
   for select using (
     auth.role() = 'service_role' or
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+    exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)
   );
 create policy "Admins can insert vpn_detection_logs" on public.vpn_detection_logs
   for insert with check (true);
 create policy "Admins can read user_restrictions" on public.user_restrictions
   for select using (
     auth.role() = 'service_role' or
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin') or
+    exists (select 1 from public.profiles where id = auth.uid() and is_admin = true) or
     user_id = auth.uid()
   );
 create policy "Admins can manage user_restrictions" on public.user_restrictions
-  for all using (auth.role() = 'service_role' or (exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')));
+  for all using (auth.role() = 'service_role' or (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)));
 create policy "Admins can read restriction_history" on public.restriction_history
   for select using (true);
 create policy "Admins can insert restriction_history" on public.restriction_history

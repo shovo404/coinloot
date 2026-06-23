@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  Clock, Coins, ShieldCheck, Filter, Zap, MapPin, Smartphone, Network, UserCheck, AlertTriangle, Sparkles,
+  Clock, Coins, ShieldCheck, Filter, Zap, UserCheck, AlertTriangle, Sparkles,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
@@ -158,36 +158,6 @@ export default function SurveyHub({ user, setUser, onRewardEarned, simulationCou
 
   return (
     <div className="px-4 lg:px-8 py-8 max-w-7xl mx-auto space-y-8 animate-fade-in">
-      {/* Header Banner */}
-      <div className="glass rounded-3xl p-6 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] font-mono tracking-widest text-cyan-300 font-bold uppercase">
-              GEO-TARGETING RADAR SIGNAL
-            </span>
-          </div>
-          <h1 className="font-sans font-bold text-2.5xl text-white tracking-tight">
-            Consolidated <span className="gradient-text">Opinion Pools</span>
-          </h1>
-          <p className="text-slate-400 text-xs max-w-xl leading-relaxed">
-            Automatic ISP and endpoint targeting enabled. High-matching survey offers are indexed below.
-          </p>
-        </div>
-
-        <div className="bg-slate-900/60 p-4 border border-white/5 rounded-2xl flex flex-wrap gap-4 text-xs font-mono text-slate-400">
-          <span className="flex items-center gap-1.5 grayscale-0">
-            <MapPin className="w-4 h-4 text-cyan-400" /> Detected: <span className="text-white font-bold">{simulationCountry === "BD" ? "Bangladesh (BD)" : simulationCountry === "US" ? "United States (US)" : simulationCountry === "UK" ? "United Kingdom (UK)" : "Iceland (IS)"}</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Smartphone className="w-4 h-4 text-purple-400" /> Device: <span className="text-white font-bold">PC Desktop</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Network className="w-4 h-4 text-amber-400" /> ISP: <span className="text-white font-bold">Galactic Fiber Corp</span>
-          </span>
-        </div>
-      </div>
-
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5 bg-slate-900/60 p-1 rounded-2xl border border-white/5">

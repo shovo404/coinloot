@@ -72,3 +72,16 @@ export function playCoinSound() {
     // Audio is non-critical — fail silently
   }
 }
+
+/**
+ * Plays the notification.mp3 sound from the public directory.
+ */
+export function playNotificationSound() {
+  try {
+    const audio = new Audio("/notification.mp3");
+    audio.volume = 0.5;
+    audio.play().catch(() => {});
+  } catch {
+    // Non-critical
+  }
+}

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from 'react-router-dom';
-import { LogIn, ShieldCheck, Zap, Users, DollarSign, CheckCircle, Globe, Star, ChevronRight, Wallet, Trophy, Gift, ClipboardCheck, Home, Menu as MenuIcon } from "lucide-react";
+import { LogIn, ShieldCheck, Zap, Users, DollarSign, CheckCircle, Globe, Star, ChevronRight, Wallet, Trophy, Gift, Home, MessageSquare } from "lucide-react";
 import { AppNotification } from "./components/Navbar";
-import { playCoinSound } from "./utils/coinSound";
+import { playCoinSound, playNotificationSound } from "./utils/coinSound";
 import RewardPopup, { usePopupQueue } from "./components/RewardPopup";
 import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult } from "./utils/vpnDetector";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
@@ -24,6 +24,7 @@ import WithdrawHub from "./components/WithdrawHub";
 import MyProfilePage from "./components/MyProfilePage";
 import AccountSettingsPage from "./components/AccountSettingsPage";
 import SecuritySettingsPage from "./components/SecuritySettingsPage";
+import SupportTicket from "./components/SupportTicket";
 
 import { UserProfile, WithdrawalRequest } from "./types";
 import { applyTheme, applyLanguage, loadPreferences, listenForSystemTheme } from "./utils/themeUtils";
@@ -228,13 +229,15 @@ export default function App() {
   useEffect(() => {
     const path = location.pathname;
     const tab = PATH_TO_TAB[path];
-    if (tab && tab !== 'landing') {
+    if (tab && tab !== 'landing' && userProfile) {
       setActiveTab(tab);
       setIsDashboardView(true);
     } else if (path === '/' && !userProfile) {
       setIsDashboardView(false);
     } else if (path === '/' && userProfile) {
       setIsDashboardView(true);
+    } else if (!userProfile) {
+      setIsDashboardView(false);
     }
   }, [location.pathname, userProfile]);
 
@@ -306,6 +309,7 @@ export default function App() {
       sourceName,
     };
     setNotifications((prev) => [newNotif, ...prev.slice(0, 49)]); // keep max 50
+    playNotificationSound();
   }, []);
 
   const handleMarkNotificationRead = useCallback((id: string) => {
@@ -486,8 +490,10 @@ export default function App() {
   const handleLogout = () => {
     setUserProfile(null);
     setIsDashboardView(false);
+    setShowAdminLogin(false);
     setNotifications([]);
     localStorage.removeItem("coinloot_profile_v3");
+    navigate('/', { replace: true });
   };
 
   // Profile navigation handler
@@ -986,8 +992,8 @@ export default function App() {
               {activeTab === "offers" && (
                 <EarnPage user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
               )}
-              {activeTab === "surveys" && (
-                <SurveyHub user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
+              {activeTab === "support-ticket" && (
+                <SupportTicket user={userProfile} setUser={setUserProfile} />
               )}
               {activeTab === "withdraw" && (
                 <WithdrawHub user={userProfile} setUser={setUserProfile} withdrawals={withdrawals} onAddWithdrawal={handleAddNewWithdrawalRequest} />
@@ -1023,42 +1029,84 @@ export default function App() {
 
       {/* ═══════ MOBILE BOTTOM TAB BAR ═══════ */}
       {isDashboardView && userProfile && setActiveTab && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-slate-950/95 backdrop-blur-xl border-t border-white/5 safe-area-bottom overflow-x-auto">
-          <div className="flex items-center justify-around px-1 py-1.5 min-w-max">
-            {[
-              { id: "offers", label: "Earn", icon: Zap },
-              { id: "surveys", label: "Surveys", icon: ClipboardCheck },
-              { id: "withdraw", label: "Withdraw", icon: Wallet },
-              { id: "affiliates", label: "Affiliates", icon: Users },
-              { id: "rewards", label: "Rewards", icon: Gift },
-              { id: "leaderboard", label: "Top", icon: Trophy },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-2.5 rounded-xl transition-all duration-200 min-w-0 min-h-[48px] ${
-                    isActive
-                      ? "text-cyan-400"
-                      : "text-slate-500 hover:text-slate-300 active:text-slate-200"
-                  }`}
-                >
-                  <div className={`relative p-1.5 rounded-lg transition-all duration-200 ${
-                    isActive ? "bg-cyan-500/10" : ""
-                  }`}>
-                    <Icon className={`w-5 h-5 ${isActive ? "text-cyan-400" : ""}`} />
-                    {isActive && (
-                      <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
-                    )}
-                  </div>
-                  <span className={`text-[9px] font-bold tracking-wide ${isActive ? "text-cyan-400" : "text-slate-500"}`}>
-                    {tab.label}
-                  </span>
-                </button>
-              );
-            })}
+        <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-slate-950/95 backdrop-blur-xl border-t border-white/5 safe-area-bottom">
+          <div className="grid grid-cols-5 items-center px-1 pt-1 pb-1.5">
+            {/* 1 — Support Ticket */}
+            <button
+              onClick={() => setActiveTab("support-ticket")}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition-all duration-200 min-w-0 min-h-[48px] ${
+                activeTab === "support-ticket" ? "text-cyan-400" : "text-slate-500 hover:text-slate-300 active:text-slate-200"
+              }`}
+            >
+              <div className={`relative p-1.5 rounded-lg transition-all duration-200 ${activeTab === "support-ticket" ? "bg-cyan-500/10" : ""}`}>
+                <MessageSquare className={`w-5 h-5 ${activeTab === "support-ticket" ? "text-cyan-400" : ""}`} />
+                {activeTab === "support-ticket" && (
+                  <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
+                )}
+              </div>
+              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "support-ticket" ? "text-cyan-400" : "text-slate-500"}`}>Support</span>
+            </button>
+
+            {/* 2 — Withdraw */}
+            <button
+              onClick={() => setActiveTab("withdraw")}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition-all duration-200 min-w-0 min-h-[48px] ${
+                activeTab === "withdraw" ? "text-cyan-400" : "text-slate-500 hover:text-slate-300 active:text-slate-200"
+              }`}
+            >
+              <div className={`relative p-1.5 rounded-lg transition-all duration-200 ${activeTab === "withdraw" ? "bg-cyan-500/10" : ""}`}>
+                <Wallet className={`w-5 h-5 ${activeTab === "withdraw" ? "text-cyan-400" : ""}`} />
+                {activeTab === "withdraw" && (
+                  <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
+                )}
+              </div>
+              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "withdraw" ? "text-cyan-400" : "text-slate-500"}`}>Withdraw</span>
+            </button>
+
+            {/* 3 — Earn (Center / Primary) */}
+            <div className="flex justify-center -mt-3">
+              <button
+                onClick={() => setActiveTab("offers")}
+                className="flex flex-col items-center justify-center gap-0.5 transition-all duration-200 min-w-0"
+              >
+                <div className="relative p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-600 shadow-[0_0_20px_rgba(6,182,212,0.35)] -translate-y-1">
+                  <Zap className="w-6 h-6 text-white" />
+                </div>
+                <span className="text-[9px] font-bold tracking-wide text-cyan-400">Earn</span>
+              </button>
+            </div>
+
+            {/* 4 — Rewards */}
+            <button
+              onClick={() => setActiveTab("rewards")}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition-all duration-200 min-w-0 min-h-[48px] ${
+                activeTab === "rewards" ? "text-cyan-400" : "text-slate-500 hover:text-slate-300 active:text-slate-200"
+              }`}
+            >
+              <div className={`relative p-1.5 rounded-lg transition-all duration-200 ${activeTab === "rewards" ? "bg-cyan-500/10" : ""}`}>
+                <Gift className={`w-5 h-5 ${activeTab === "rewards" ? "text-cyan-400" : ""}`} />
+                {activeTab === "rewards" && (
+                  <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
+                )}
+              </div>
+              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "rewards" ? "text-cyan-400" : "text-slate-500"}`}>Rewards</span>
+            </button>
+
+            {/* 5 — Leaderboard */}
+            <button
+              onClick={() => setActiveTab("leaderboard")}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl transition-all duration-200 min-w-0 min-h-[48px] ${
+                activeTab === "leaderboard" ? "text-cyan-400" : "text-slate-500 hover:text-slate-300 active:text-slate-200"
+              }`}
+            >
+              <div className={`relative p-1.5 rounded-lg transition-all duration-200 ${activeTab === "leaderboard" ? "bg-cyan-500/10" : ""}`}>
+                <Trophy className={`w-5 h-5 ${activeTab === "leaderboard" ? "text-cyan-400" : ""}`} />
+                {activeTab === "leaderboard" && (
+                  <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
+                )}
+              </div>
+              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "leaderboard" ? "text-cyan-400" : "text-slate-500"}`}>Leaderboard</span>
+            </button>
           </div>
         </nav>
       )}

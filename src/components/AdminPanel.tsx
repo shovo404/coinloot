@@ -3,13 +3,17 @@ import {
   LayoutDashboard, Users, DollarSign, ShieldAlert, CheckCircle, XCircle, Search,
   Settings, Coins, BarChart3, TrendingUp, TrendingDown, Trophy,
   Activity, Globe, Lock, Unlock, Upload, Bell, Gift, Link2, Award, Flag, FileText,
+  Crown, Flame, ClipboardCheck, ShieldCheck,
   UserCheck, UserX, Plus, Minus, Trash2, Edit, Send, Wallet, Zap, Clock, Server,
   Loader2, AlertTriangle, RefreshCw, Wifi, Eye, EyeOff, Copy, Ban, X,
   ChevronDown, ChevronUp, Filter, Download, Shield, Key, Percent,
   Calendar, UserPlus, ExternalLink, MoreHorizontal, HardDrive, Signal, Circle,
   Sun, Moon, List, LayoutGrid, ArrowUpRight, ArrowDownRight, Gauge, Mail, History,
+  ArrowLeft, MessageSquare, ChevronRight, User,
+  Megaphone,
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, SiteSettings, WithdrawalMethodConfig } from "../types";
+import { Ticket } from "./SupportTicket";
 import { playCoinSound } from "../utils/coinSound";
 import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry } from "../utils/vpnDetector";
 
@@ -411,6 +415,16 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [editCoins, setEditCoins] = useState(0);
   const [editUsd, setEditUsd] = useState(0);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // ── Homepage Sections State ──
+  const loadHomepageSections = () => {
+    try {
+      const saved = localStorage.getItem("coinloot_homepage_sections");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { featured: true, hot: true, surveys: true, offerwalls: true };
+  };
+  const [homepageSections, setHomepageSections] = useState(loadHomepageSections);
 
   // ── Locked Offers Rules State ──
   const [rules, setRules] = useState<{ id: string; name: string; type: string; value: number }[]>(() => {
@@ -1983,6 +1997,161 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
+    // ═══ TICKETS ═══
+    if (section === "tickets") {
+      const allTickets: Ticket[] = (() => {
+        try { return JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]"); } catch { return []; }
+      })();
+      const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+      const [adminReply, setAdminReply] = useState("");
+      const [ticketMessages, setTicketMessages] = useState<any[]>([]);
+      const [ticketList, setTicketList] = useState(allTickets);
+      const chatEndRef = useRef<HTMLDivElement>(null);
+
+      useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketMessages]);
+
+      const openTicket = (t: Ticket) => {
+        setSelectedTicket(t);
+        try {
+          const msgs = JSON.parse(localStorage.getItem(`coinloot_support_tickets_messages_${t.id}`) || "[]");
+          setTicketMessages(msgs);
+        } catch { setTicketMessages([]); }
+      };
+
+      const handleAdminReply = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!adminReply.trim() || !selectedTicket) return;
+        const now = new Date().toISOString();
+        const msg = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          ticketId: selectedTicket.id,
+          senderId: user.id,
+          senderName: user.username,
+          senderRole: "admin",
+          text: adminReply,
+          createdAt: now,
+        };
+        const updatedMessages = [...ticketMessages, msg];
+        setTicketMessages(updatedMessages);
+        localStorage.setItem(`coinloot_support_tickets_messages_${selectedTicket.id}`, JSON.stringify(updatedMessages));
+
+        // Update ticket status
+        if (selectedTicket.status === "OPEN") {
+          const updatedTickets = ticketList.map((t) => t.id === selectedTicket.id ? { ...t, status: "ANSWERED" as const } : t);
+          setTicketList(updatedTickets);
+          localStorage.setItem("coinloot_support_tickets", JSON.stringify(updatedTickets));
+          setSelectedTicket({ ...selectedTicket, status: "ANSWERED" });
+        }
+        setAdminReply("");
+      };
+
+      const backTo = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setSelectedTicket(null);
+        try {
+          const refreshed = JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]");
+          setTicketList(refreshed);
+        } catch {}
+      };
+
+      if (selectedTicket) {
+        const ticket = selectedTicket;
+        return (
+          <div className="p-4 lg:p-6 h-full flex flex-col max-w-3xl mx-auto w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={backTo} className="p-2 rounded-xl bg-slate-800/60 border border-white/5 text-slate-400 hover:text-white transition-all cursor-pointer"><ArrowLeft className="w-4 h-4" /></button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-sm font-bold text-white truncate">{ticket.subject}</h2>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px] text-slate-500 font-mono">{ticket.username}</span>
+                  <span className="text-[9px] text-slate-600">•</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold font-mono ${
+                    ticket.status === "OPEN" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                    ticket.status === "ANSWERED" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" :
+                    "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                  }`}>{ticket.status}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 mb-3" style={{ maxHeight: "calc(100vh - 280px)" }}>
+              {ticketMessages.map((msg: any) => (
+                <div key={msg.id} className={`flex ${msg.senderRole === "admin" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 ${
+                    msg.senderRole === "admin"
+                      ? "bg-gradient-to-br from-cyan-500 to-purple-600 text-white rounded-br-md"
+                      : "bg-slate-800/80 border border-white/5 text-slate-200 rounded-bl-md"
+                  }`}>
+                    {msg.senderRole === "user" && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <User className="w-3 h-3 text-slate-400" />
+                        <span className="text-[9px] font-bold text-slate-400 font-mono">{msg.senderName}</span>
+                      </div>
+                    )}
+                    <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                    <span className={`block text-[8px] mt-1.5 font-mono ${msg.senderRole === "admin" ? "text-white/60" : "text-slate-500"}`}>
+                      {new Date(msg.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleAdminReply} className="flex items-center gap-2 glass rounded-2xl p-2 border border-white/5">
+              <input type="text" value={adminReply} onChange={(e) => setAdminReply(e.target.value)} placeholder="Type your reply..." className="flex-1 bg-transparent border-none px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none" />
+              <button type="submit" disabled={!adminReply.trim()} className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white disabled:opacity-40 transition-all cursor-pointer disabled:cursor-not-allowed">
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-4 lg:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl lg:text-2xl font-bold text-white">Support Tickets</h1>
+            <span className="px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-mono font-bold border border-cyan-500/20">{ticketList.length} total</span>
+          </div>
+
+          {ticketList.length === 0 && (
+            <div className="text-center py-20 glass rounded-3xl border border-dashed border-cyan-500/10">
+              <MessageSquare className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <p className="text-sm text-slate-400">No support tickets yet</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {ticketList.map((ticket) => (
+              <button key={ticket.id} onClick={() => openTicket(ticket)} className="w-full text-left glass rounded-2xl p-4 hover:border-cyan-400/30 transition-all border border-white/5 cursor-pointer group">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold font-mono ${
+                        ticket.status === "OPEN" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                        ticket.status === "ANSWERED" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" :
+                        "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      }`}>{ticket.status}</span>
+                      <span className="text-[9px] text-slate-600 font-mono">{new Date(ticket.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <h3 className="text-sm font-bold text-white truncate group-hover:text-cyan-300 transition-colors">{ticket.subject}</h3>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <User className="w-3 h-3 text-slate-500" />
+                      <span className="text-[10px] text-slate-500 font-mono">{ticket.username}</span>
+                      <span className="text-[9px] text-slate-600">•</span>
+                      <span className="text-[10px] text-slate-600 font-mono">{ticket.category}</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-600 shrink-0 mt-1" />
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
     // ═══ ANALYTICS ═══
     if (section === "analytics") {
       const countryMap = new Map<string, number>();
@@ -2108,6 +2277,215 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               />
             )}
           </div>
+        </div>
+      );
+    }
+
+    // ═══ HOMEPAGE — Earn Page Sections + Announcements & Promo ═══
+    if (section === "homepage") {
+      // ── Earn Page Section Visibility ──
+      const toggleSection = (key: string) => {
+        const updated = { ...homepageSections, [key]: !homepageSections[key] };
+        setHomepageSections(updated);
+        localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
+        showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
+      };
+      const sectionMeta: { key: string; label: string; icon: any; desc: string }[] = [
+        { key: "featured", label: "Featured Offers", icon: Crown, desc: "Show the Featured Offers carousel on the earn page" },
+        { key: "hot", label: "Hot Offers", icon: Flame, desc: "Show the Hot Offers carousel on the earn page" },
+        { key: "surveys", label: "Surveys", icon: ClipboardCheck, desc: "Show the Surveys section on the earn page" },
+        { key: "offerwalls", label: "Offerwall Providers", icon: ShieldCheck, desc: "Show the Offerwall Providers grid on the earn page" },
+      ];
+
+      // ── Announcements & Promo State ──
+      const defaultAnnouncements = {
+        announcement1: { enabled: true, title: "Welcome to CoinLoot", description: "Complete offers and earn real rewards. Start your earning journey today!", icon: "🚀" },
+        announcement2: { enabled: false, title: "Double Coins Weekend", description: "Earn 2x coins on all surveys and offers this weekend only!", icon: "⚡" },
+        promo: { enabled: true, code: "WELCOME50", description: "Use code WELCOME50 for 50 bonus coins on your first withdrawal!", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() },
+      };
+      const loadAnnouncements = () => {
+        try {
+          const saved = localStorage.getItem("coinloot_homepage_announcements");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            return {
+              announcement1: { ...defaultAnnouncements.announcement1, ...parsed.announcement1 },
+              announcement2: { ...defaultAnnouncements.announcement2, ...parsed.announcement2 },
+              promo: { ...defaultAnnouncements.promo, ...parsed.promo },
+            };
+          }
+        } catch {}
+        return defaultAnnouncements;
+      };
+      const saveAnnouncements = (data: any) => {
+        localStorage.setItem("coinloot_homepage_announcements", JSON.stringify(data));
+      };
+
+      const [announceData, setAnnounceData] = useState(loadAnnouncements);
+
+      const updateAnnounce = (key: string, field: string, value: any) => {
+        const updated = { ...announceData, [key]: { ...announceData[key], [field]: value } };
+        setAnnounceData(updated);
+        saveAnnouncements(updated);
+      };
+
+      const [localTab, setLocalTab] = useState<"sections" | "announcements">("announcements");
+
+      return (
+        <div className="p-4 lg:p-6 space-y-4 max-w-4xl">
+          {/* ── Tab Toggle ── */}
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => setLocalTab("announcements")} className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${localTab === "announcements" ? "bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg" : "bg-slate-800/60 text-slate-400 border border-white/5 hover:border-cyan-400/30"}`}>
+              <Megaphone className="w-3.5 h-3.5 inline mr-1.5" />
+              Announcements & Promo
+            </button>
+            <button onClick={() => setLocalTab("sections")} className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${localTab === "sections" ? "bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg" : "bg-slate-800/60 text-slate-400 border border-white/5 hover:border-cyan-400/30"}`}>
+              <Globe className="w-3.5 h-3.5 inline mr-1.5" />
+              Earn Page Sections
+            </button>
+          </div>
+
+          {/* ── Announcements & Promo Tab ── */}
+          {localTab === "announcements" && (
+            <div className="space-y-4">
+              <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-cyan-400" /> Announcements & Promo Management
+              </h1>
+              <p className="text-[10px] text-slate-500 font-mono">Control announcements and promo codes shown on the earn page. Changes apply immediately.</p>
+
+              {/* ═══ Announcement #1 ═══ */}
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Megaphone className="w-4 h-4 text-cyan-400" /> Announcement #1</h3>
+                  <button
+                    onClick={() => updateAnnounce("announcement1", "enabled", !announceData.announcement1.enabled)}
+                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.announcement1.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.announcement1.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Title</label>
+                    <input value={announceData.announcement1.title} onChange={(e) => updateAnnounce("announcement1", "title", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Icon (emoji)</label>
+                    <input value={announceData.announcement1.icon} onChange={(e) => updateAnnounce("announcement1", "icon", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
+                  <textarea value={announceData.announcement1.description} onChange={(e) => updateAnnounce("announcement1", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
+                </div>
+              </div>
+
+              {/* ═══ Announcement #2 ═══ */}
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Megaphone className="w-4 h-4 text-purple-400" /> Announcement #2</h3>
+                  <button
+                    onClick={() => updateAnnounce("announcement2", "enabled", !announceData.announcement2.enabled)}
+                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.announcement2.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.announcement2.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Title</label>
+                    <input value={announceData.announcement2.title} onChange={(e) => updateAnnounce("announcement2", "title", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Icon (emoji)</label>
+                    <input value={announceData.announcement2.icon} onChange={(e) => updateAnnounce("announcement2", "icon", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
+                  <textarea value={announceData.announcement2.description} onChange={(e) => updateAnnounce("announcement2", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
+                </div>
+              </div>
+
+              {/* ═══ Promo Code ═══ */}
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Gift className="w-4 h-4 text-amber-400" /> Promo Code</h3>
+                  <button
+                    onClick={() => updateAnnounce("promo", "enabled", !announceData.promo.enabled)}
+                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.promo.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.promo.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Promo Code</label>
+                    <input value={announceData.promo.code} onChange={(e) => updateAnnounce("promo", "code", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white uppercase tracking-wider" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Expiry Date/Time</label>
+                    <input type="datetime-local" value={announceData.promo.expiresAt ? new Date(announceData.promo.expiresAt).toISOString().slice(0, 16) : ""} onChange={(e) => updateAnnounce("promo", "expiresAt", new Date(e.target.value).toISOString())} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
+                  <textarea value={announceData.promo.description} onChange={(e) => updateAnnounce("promo", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <span className={`px-3 py-1.5 rounded-lg text-[10px] font-bold font-mono ${new Date(announceData.promo.expiresAt).getTime() > Date.now() ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"}`}>
+                    {new Date(announceData.promo.expiresAt).getTime() > Date.now() ? "Active" : "Expired"}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">Expires: {new Date(announceData.promo.expiresAt).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Earn Page Sections Tab ── */}
+          {localTab === "sections" && (
+            <>
+              <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+                <Globe className="w-5 h-5 text-cyan-400" /> Earn Page Sections
+              </h1>
+              <p className="text-[10px] text-slate-500 font-mono">Control which sections are visible on the earn page. Changes apply immediately.</p>
+              <div className="space-y-3">
+                {sectionMeta.map(({ key, label, icon: Icon, desc }) => {
+                  const isVisible = homepageSections[key];
+                  return (
+                    <div key={key} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isVisible ? "bg-emerald-500/10" : "bg-slate-800/60"}`}>
+                          <Icon className={`w-4 h-4 ${isVisible ? "text-emerald-400" : "text-slate-500"}`} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="block text-sm font-semibold text-white">{label}</span>
+                          <span className="block text-[9px] text-slate-500 font-mono mt-0.5 truncate">{desc}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleSection(key)}
+                        className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${isVisible ? "bg-emerald-500" : "bg-slate-700"}`}
+                      >
+                        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${isVisible ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+                <h3 className="font-bold text-sm text-white mb-2 flex items-center gap-2"><Eye className="w-4 h-4 text-cyan-400" /> Current Visibility</h3>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(homepageSections).map(([key, val]) => (
+                    <span key={key} className={`px-3 py-1.5 rounded-xl text-[10px] font-mono font-bold flex items-center gap-1.5 ${val ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800/60 text-slate-500 border border-slate-700/30"}`}>
+                      {val ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                      {key.charAt(0).toUpperCase() + key.slice(1)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       );
     }

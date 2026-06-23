@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Coins, LogIn, ShieldAlert, ShieldCheck, Award, Bell, User, Fingerprint, CheckCircle, AlertTriangle, Settings, LogOut, UserCog, Menu, X, Zap, Wallet, Trophy, Gift, ClipboardCheck, Users } from "lucide-react";
+import { Coins, LogIn, ShieldAlert, ShieldCheck, Award, Bell, User, Fingerprint, CheckCircle, AlertTriangle, Settings, LogOut, UserCog, Menu, X, Zap, Wallet, Trophy, Gift, ClipboardCheck, Users, MessageSquare } from "lucide-react";
 import { UserProfile } from "../types";
 import { getProviderInfo } from "../utils/providerLogos";
 
@@ -51,7 +51,6 @@ export default function Navbar({
   const profileMobileRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const mobileNotifRef = useRef<HTMLDivElement>(null);
-  const dropdownTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
@@ -110,17 +109,6 @@ export default function Navbar({
     setOpenDropdown(openDropdown === name ? null : name);
   };
 
-  const handleMouseEnter = (name: string) => {
-    clearTimeout(dropdownTimeout.current);
-    setOpenDropdown(name);
-  };
-
-  const handleMouseLeave = () => {
-    dropdownTimeout.current = setTimeout(() => {
-      setOpenDropdown(null);
-    }, 200);
-  };
-
   const timeAgo = (isoString: string) => {
     const diff = Date.now() - new Date(isoString).getTime();
     const mins = Math.floor(diff / 60000);
@@ -132,12 +120,11 @@ export default function Navbar({
   };
 
   const dashboardTabs = [
-    { id: "offers", label: "Earn", icon: Zap },
-    { id: "surveys", label: "Surveys", icon: ClipboardCheck },
+    { id: "support-ticket", label: "Support Ticket", icon: MessageSquare },
     { id: "withdraw", label: "Withdraw", icon: Wallet },
-    { id: "leaderboard", label: "Leaderboard", icon: Trophy },
-    { id: "affiliates", label: "Affiliates", icon: Users },
+    { id: "offers", label: "Earn", icon: Zap },
     { id: "rewards", label: "Rewards", icon: Gift },
+    { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   ];
 
   const handleMobileNav = (tabId: string) => {
@@ -168,12 +155,11 @@ export default function Navbar({
         {user && setActiveTab && (
           <div className="hidden lg:flex items-center gap-0.5 xl:gap-1 mx-2 xl:mx-4">
             {[
-              { id: "offers", label: "Earn", icon: Zap },
-              { id: "surveys", label: "Surveys", icon: ClipboardCheck },
+              { id: "support-ticket", label: "Support Ticket", icon: MessageSquare },
               { id: "withdraw", label: "Withdraw", icon: Wallet },
-              { id: "leaderboard", label: "Leaderboard", icon: Trophy },
-              { id: "affiliates", label: "Affiliates", icon: Users },
+              { id: "offers", label: "Earn", icon: Zap },
               { id: "rewards", label: "Rewards", icon: Gift },
+              { id: "leaderboard", label: "Leaderboard", icon: Trophy },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -202,7 +188,7 @@ export default function Navbar({
             {/* Desktop Controls */}
             <div className="hidden md:flex items-center gap-1.5 lg:gap-2">
               {/* ── Security Status ── */}
-              <div ref={securityRef} className="relative" onMouseEnter={() => handleMouseEnter("security")} onMouseLeave={handleMouseLeave}>
+              <div ref={securityRef} className="relative">
                 <button
                   onClick={() => toggleDropdown("security")}
                   className={`p-2 rounded-lg border transition-all relative min-h-[36px] min-w-[36px] flex items-center justify-center ${
@@ -218,10 +204,7 @@ export default function Navbar({
 
                 {/* Security Dropdown */}
                 {openDropdown === "security" && (
-                  <div className="absolute right-0 top-full mt-2 w-72 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-zoom-in z-50"
-                    onMouseEnter={() => handleMouseEnter("security")}
-                    onMouseLeave={handleMouseLeave}
-                  >
+                  <div className="absolute right-0 top-full mt-2 w-72 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-zoom-in z-50">
                     <div className="p-4 border-b border-white/5">
                       <div className="flex items-center gap-2">
                         <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -272,7 +255,7 @@ export default function Navbar({
               </div>
 
               {/* ── Notifications ── */}
-              <div ref={notifRef} className="relative" onMouseEnter={() => handleMouseEnter("notifications")} onMouseLeave={handleMouseLeave}>
+              <div ref={notifRef} className="relative">
                 <button
                   onClick={() => toggleDropdown("notifications")}
                   className={`p-2 rounded-xl border transition-all relative min-h-[36px] min-w-[36px] flex items-center justify-center ${
@@ -290,7 +273,7 @@ export default function Navbar({
               </div>
 
               {/* ── User Profile ── */}
-              <div ref={profileRef} className="relative" onMouseEnter={() => handleMouseEnter("profile")} onMouseLeave={handleMouseLeave}>
+              <div ref={profileRef} className="relative">
                 <button
                   onClick={() => toggleDropdown("profile")}
                   className={`p-2 rounded-xl border transition-all flex items-center justify-center min-h-[36px] min-w-[36px] ${
@@ -472,10 +455,7 @@ export default function Navbar({
         <>
           {/* Mobile backdrop - covers below header only, so header buttons stay clickable */}
           <div className="fixed top-[66px] left-0 right-0 bottom-0 z-40 md:hidden" onClick={() => setOpenDropdown(null)} />
-          <div className="absolute md:absolute right-2 md:right-0 top-full md:top-[70px] left-2 md:left-auto w-auto md:w-80 max-w-full md:max-w-[calc(100vw-1.5rem)] glass-notification rounded-2xl overflow-hidden animate-slide-up md:animate-zoom-in z-50 mobile-dropdown-panel"
-            onMouseEnter={() => handleMouseEnter("notifications")}
-            onMouseLeave={handleMouseLeave}
-          >
+          <div className="absolute md:absolute right-2 md:right-0 top-full md:top-[70px] left-2 md:left-auto w-auto md:w-80 max-w-full md:max-w-[calc(100vw-1.5rem)] glass-notification rounded-2xl overflow-hidden animate-slide-up md:animate-zoom-in z-50 mobile-dropdown-panel">
           <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
             <span className="font-sans font-bold text-sm text-white tracking-wide">Notifications</span>
             {unreadCount > 0 && <button onClick={onMarkAllRead} className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">Mark all read</button>}
@@ -541,10 +521,7 @@ export default function Navbar({
         <>
           {/* Mobile backdrop - covers below header only, so header buttons stay clickable */}
           <div className="fixed top-[66px] left-0 right-0 bottom-0 z-40 md:hidden" onClick={() => setOpenDropdown(null)} />
-          <div className="absolute md:absolute right-2 md:right-0 top-full md:top-[70px] left-2 md:left-auto w-auto md:w-56 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-slide-up md:animate-zoom-in z-50 mobile-dropdown-panel"
-            onMouseEnter={() => handleMouseEnter("profile")}
-            onMouseLeave={handleMouseLeave}
-          >
+          <div className="absolute md:absolute right-2 md:right-0 top-full md:top-[70px] left-2 md:left-auto w-auto md:w-56 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-slide-up md:animate-zoom-in z-50 mobile-dropdown-panel">
           <div className="p-4 border-b border-white/5">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-sm">{user.username[0].toUpperCase()}</div>

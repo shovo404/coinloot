@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   TrendingUp, DollarSign, Sparkles, ShieldCheck, Zap, Coins,
-  Trophy, Star, Lock, ArrowUpRight, Info,
-  Rocket, ChevronRight, Play, BarChart3, Flame,
-  Crown,
+  Star, Lock, ArrowUpRight, Info,
+  ChevronRight, Play, BarChart3, Flame,
+  Crown, ClipboardCheck, Megaphone, Gift, Clock,
 } from "lucide-react";
 import { UserProfile, Offer } from "../types";
 import { isUserRestricted } from "../utils/vpnDetector";
@@ -11,6 +11,7 @@ import { getProviderInfo, getProviderLogoUrl, getAllProviders } from "../utils/p
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getConnectedProviders, fetchOffersFromProvider } from "../utils/fetchOfferwallOffers";
 import HorizontalScroll from "./HorizontalScroll";
+import SurveyHub from "./SurveyHub";
 
 interface EarnPageProps {
   user: UserProfile;
@@ -111,6 +112,24 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   const [adminOffers, setAdminOffers] = useState<AdminOffer[]>(() => loadAdminOffers());
   useEffect(() => { setAdminOffers(loadAdminOffers()); }, [user.balance_coins]);
+
+  const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("coinloot_homepage_sections");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { featured: true, hot: true, surveys: true, offerwalls: true };
+  });
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const saved = localStorage.getItem("coinloot_homepage_sections");
+        if (saved) setVisibleSections(JSON.parse(saved));
+      } catch {}
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
 
   // Auto-fetch offers from connected offerwall providers
   useEffect(() => {
@@ -261,89 +280,11 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   return (
     <section className="px-4 lg:px-8 py-6 max-w-7xl mx-auto space-y-8">
-      {/* ═══════════════════ HERO SECTION ═══════════════════ */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900/80 via-slate-950/80 to-indigo-950/40 border border-white/5 p-6 lg:p-10">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-cyan-500/5 blur-[120px] rounded-full pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-purple-500/5 blur-[100px] rounded-full pointer-events-none" />
-
-        {isDeveloperMode() && (
-          <div className="relative z-10 mb-4 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-mono flex items-center gap-2">
-            <span className="text-base">🔧</span> Offers are temporarily disabled — site under development
-          </div>
-        )}
-        <div className="relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
-          <div className="flex-1 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-mono font-semibold uppercase tracking-wider mb-4">
-              <Zap className="w-3 h-3" />
-              Earn & Rewards Platform
-            </div>
-            <h1 className="text-3xl lg:text-5xl font-bold text-white leading-tight tracking-tight">
-              Choose Your
-              <br />
-              <span className="bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 bg-clip-text text-transparent">
-                Earning Method
-              </span>
-            </h1>
-            <p className="text-slate-400 text-sm lg:text-base mt-4 leading-relaxed max-w-xl mx-auto lg:mx-0">
-              Earn coins by completing offers, surveys, app installs, and promotional activities from top providers worldwide.
-            </p>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mt-6 justify-center lg:justify-start">
-              <button className="px-5 py-3 sm:py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-bold tracking-wide hover:scale-[1.02] transition-all shadow-lg shadow-cyan-500/10 flex items-center justify-center gap-2 cursor-pointer min-h-[44px]">
-                <Play className="w-3.5 h-3.5" />
-                How It Works
-              </button>
-              <button className="px-5 py-3 sm:py-2.5 rounded-2xl bg-slate-900 border border-white/10 text-slate-200 text-xs font-semibold tracking-wide hover:border-cyan-500/30 hover:text-cyan-300 transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]">
-                <Rocket className="w-3.5 h-3.5" />
-                Start Earning
-              </button>
-            </div>
-          </div>
-
-          <div className="shrink-0 relative">
-            <div className="w-52 h-52 lg:w-64 lg:h-64 relative flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-500/20 via-purple-500/10 to-transparent blur-2xl animate-pulse" />
-              <div className="absolute inset-4 rounded-full border border-cyan-400/20 animate-[spin_8s_linear_infinite]" />
-              <div className="absolute inset-8 rounded-full border border-purple-400/10 animate-[spin_12s_linear_infinite_reverse]" />
-              <div className="relative z-10 w-32 h-32 lg:w-40 lg:h-40 rounded-full bg-gradient-to-br from-cyan-500/20 to-purple-600/20 border-2 border-cyan-400/30 flex items-center justify-center shadow-[0_0_40px_rgba(6,182,212,0.15)]">
-                <div className="text-center">
-                  <Coins className="w-10 h-10 lg:w-14 lg:h-14 text-cyan-400 mx-auto" />
-                  <span className="block text-[10px] font-mono text-cyan-300 mt-1 font-bold animate-pulse">EARN</span>
-                </div>
-                <div className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg animate-bounce">
-                  <span className="text-[10px] font-bold text-white">$</span>
-                </div>
-                <div className="absolute -bottom-1 -left-1 w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center shadow-lg animate-bounce" style={{ animationDelay: "0.5s" }}>
-                  <Trophy className="w-3 h-3 text-white" />
-                </div>
-                <div className="absolute top-1 -left-3 w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg animate-bounce" style={{ animationDelay: "1s" }}>
-                  <Star className="w-2.5 h-2.5 text-white" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 mt-8 pt-6 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="text-center">
-            <span className="block text-lg font-bold font-mono text-white">{adminOffers.filter(o => o.status === "active").length || 24}</span>
-            <span className="block text-[9px] text-slate-500 font-mono uppercase mt-1">Active Offers</span>
-          </div>
-          <div className="text-center">
-            <span className="block text-lg font-bold font-mono text-cyan-400">{user.total_earned_coins.toLocaleString()}</span>
-            <span className="block text-[9px] text-slate-500 font-mono uppercase mt-1">Coins Earned</span>
-          </div>
-          <div className="text-center">
-            <span className="block text-lg font-bold font-mono text-purple-400">{OFFERWALL_PROVIDERS.length + SURVEY_PROVIDERS.length}</span>
-            <span className="block text-[9px] text-slate-500 font-mono uppercase mt-1">Providers</span>
-          </div>
-          <div className="text-center">
-            <span className="block text-lg font-bold font-mono text-amber-400">{user.level}</span>
-            <span className="block text-[9px] text-slate-500 font-mono uppercase mt-1">Your Level</span>
-          </div>
-        </div>
-      </div>
+      {/* ═══════════════════ HOME BANNERS ═══════════════════ */}
+      <HomeBanners user={user} />
 
       {/* ═══════════════════ FEATURED OFFERS ═══════════════════ */}
+      {visibleSections.featured && (
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
@@ -431,8 +372,10 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
           })}
         </HorizontalScroll>
       </div>
+      )}
 
       {/* ═══════════════════ HOT OFFERS ═══════════════════ */}
+      {visibleSections.hot && (
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
@@ -511,8 +454,17 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
           })}
         </HorizontalScroll>
       </div>
+      )}
+
+      {/* ═══════════════════ SURVEYS ═══════════════════ */}
+      {visibleSections.surveys && (
+        <div id="surveys-section">
+          <SurveyHub user={user} setUser={setUser} onRewardEarned={onRewardEarned} simulationCountry={simulationCountry} />
+        </div>
+      )}
 
       {/* ═══════════════════ OFFERWALL PROVIDERS ═══════════════════ */}
+      {visibleSections.offerwalls && (
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
@@ -609,9 +561,10 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
           })}
         </HorizontalScroll>
       </div>
+      )}
 
       {/* ═══════════════════ LOCKED OFFERWALLS ═══════════════════ */}
-      {adminOffers.filter((o) => o.status === "locked" || o.status === "inactive").length > 0 && (
+      {visibleSections.offerwalls && adminOffers.filter((o) => o.status === "locked" || o.status === "inactive").length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
@@ -731,5 +684,186 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
         </div>
       )}
     </section>
+  );
+}
+
+// ═══ HOME BANNERS — Admin-Controlled Announcements & Promo ═══
+interface AnnouncementData {
+  enabled: boolean;
+  title: string;
+  description: string;
+  icon: string;
+}
+
+interface PromoData {
+  enabled: boolean;
+  code: string;
+  description: string;
+  expiresAt: string;
+}
+
+interface HomeBannerData {
+  announcement1: AnnouncementData;
+  announcement2: AnnouncementData;
+  promo: PromoData;
+}
+
+const DEFAULT_ANNOUNCEMENTS: HomeBannerData = {
+  announcement1: { enabled: true, title: "Welcome to CoinLoot", description: "Complete offers and earn real rewards. Start your earning journey today!", icon: "🚀" },
+  announcement2: { enabled: false, title: "Double Coins Weekend", description: "Earn 2x coins on all surveys and offers this weekend only!", icon: "⚡" },
+  promo: { enabled: true, code: "WELCOME50", description: "Use code WELCOME50 for 50 bonus coins on your first withdrawal!", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() },
+};
+
+function loadAnnouncements(): HomeBannerData {
+  try {
+    const saved = localStorage.getItem("coinloot_homepage_announcements");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return {
+        announcement1: { ...DEFAULT_ANNOUNCEMENTS.announcement1, ...parsed.announcement1 },
+        announcement2: { ...DEFAULT_ANNOUNCEMENTS.announcement2, ...parsed.announcement2 },
+        promo: { ...DEFAULT_ANNOUNCEMENTS.promo, ...parsed.promo },
+      };
+    }
+  } catch {}
+  return DEFAULT_ANNOUNCEMENTS;
+}
+
+function PromoCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(Date.now());
+  const expired = now >= new Date(expiresAt).getTime();
+  const diff = Math.max(0, new Date(expiresAt).getTime() - now);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+
+  return (
+    <div className="flex items-center gap-3">
+      {expired ? (
+        <span className="px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold font-mono">Expired</span>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Clock className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="text-xs font-mono font-bold text-cyan-300 tabular-nums">
+            {days > 0 && <span className="mr-1">{days}d</span>}
+            {String(hours).padStart(2, "0")}:{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HomeBanners({ user }: { user: UserProfile }) {
+  const [data, setData] = useState<HomeBannerData>(loadAnnouncements);
+
+  useEffect(() => {
+    const handler = () => setData(loadAnnouncements());
+    window.addEventListener("storage", handler);
+    const poll = setInterval(handler, 2000);
+    return () => {
+      window.removeEventListener("storage", handler);
+      clearInterval(poll);
+    };
+  }, []);
+
+  const { announcement1, announcement2, promo } = data;
+  const cards: { key: string; element: React.ReactNode }[] = [];
+
+  if (announcement1.enabled) {
+    cards.push({
+      key: "ann1",
+      element: (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-indigo-950/40 border border-white/5 p-5 h-full group hover:border-cyan-400/30 transition-all">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-cyan-500/5 blur-[80px] rounded-full pointer-events-none" />
+          <div className="relative z-10 flex flex-col h-full">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-2xl">{announcement1.icon || "📢"}</span>
+              <h3 className="text-sm font-bold text-white">{announcement1.title}</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed flex-1">{announcement1.description}</p>
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  if (announcement2.enabled) {
+    cards.push({
+      key: "ann2",
+      element: (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-purple-950/40 border border-white/5 p-5 h-full group hover:border-purple-400/30 transition-all">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-purple-500/5 blur-[80px] rounded-full pointer-events-none" />
+          <div className="relative z-10 flex flex-col h-full">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-2xl">{announcement2.icon || "📢"}</span>
+              <h3 className="text-sm font-bold text-white">{announcement2.title}</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed flex-1">{announcement2.description}</p>
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  if (promo.enabled) {
+    const expired = Date.now() >= new Date(promo.expiresAt).getTime();
+    cards.push({
+      key: "promo",
+      element: (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-amber-950/30 border border-white/5 p-5 h-full group hover:border-amber-400/30 transition-all">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-amber-500/5 blur-[80px] rounded-full pointer-events-none" />
+          <div className="relative z-10 flex flex-col h-full">
+            <div className="flex items-center gap-3 mb-3">
+              <Gift className="w-5 h-5 text-amber-400" />
+              <h3 className="text-sm font-bold text-white">Promo Code</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed mb-3 flex-1">{promo.description}</p>
+            <div className="flex items-center gap-2 mb-3">
+              <code className="px-3 py-1.5 rounded-lg bg-black/40 border border-amber-500/20 text-amber-300 text-xs font-mono font-bold tracking-wider select-all">
+                {promo.code}
+              </code>
+            </div>
+            <div className="flex items-center justify-between mt-auto">
+              <PromoCountdown expiresAt={promo.expiresAt} />
+              <button
+                disabled={expired}
+                className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${
+                  expired
+                    ? "bg-slate-800/60 text-slate-600 border border-slate-700/30 cursor-not-allowed"
+                    : "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/20 hover:shadow-xl hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-95"
+                }`}
+              >
+                {expired ? "Expired" : "Redeem"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  if (cards.length === 0) return null;
+
+  const gridCols =
+    cards.length === 1
+      ? "grid-cols-1"
+      : cards.length === 2
+        ? "grid-cols-1 sm:grid-cols-2"
+        : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+
+  return (
+    <div className={`grid ${gridCols} gap-4`}>
+      {cards.map((c) => (
+        <div key={c.key}>{c.element}</div>
+      ))}
+    </div>
   );
 }

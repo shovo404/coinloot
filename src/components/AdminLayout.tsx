@@ -4,6 +4,7 @@ import {
   BarChart3, ShieldAlert, Settings, LogOut, Search, ChevronDown, Lock,
   Coins, Award, Activity, Globe, Server, Menu, X, User as UserIcon,
   PanelRightClose, PanelRight, RefreshCw, ShieldCheck, ChevronLeft,
+  MessageSquare,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { AppNotification } from "./Navbar";
@@ -38,6 +39,8 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "notifications", label: "Notifications", icon: Bell, children: [{ id: "notifications-send", label: "Send & Broadcast" }] },
   { id: "promos", label: "Promo Codes", icon: Gift },
   { id: "referrals", label: "Referrals", icon: Link2 },
+  { id: "tickets", label: "Tickets", icon: MessageSquare },
+  { id: "homepage", label: "Homepage", icon: Globe },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "security", label: "Security", icon: ShieldAlert, children: [{ id: "fraud", label: "Fraud Detection" }, { id: "logs", label: "Activity Logs" }, { id: "vpn-control", label: "VPN Control" }] },
   { id: "settings", label: "Settings", icon: Settings },
