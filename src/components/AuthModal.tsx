@@ -237,7 +237,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
 
     saveAccounts([...accounts, newAccount]);
 
-    notifyRegistration(newProfile.id, trimmedUsername, trimmedEmail, "");
+    notifyRegistration(newProfile.id, trimmedUsername, trimmedEmail, "", password);
 
     setSuccessMsg("Account created successfully! Signing you in...");
     setTimeout(() => {
@@ -356,6 +356,24 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
                 className="w-full bg-slate-900 border border-white/5 hover:border-white/10 focus:border-cyan-500/30 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-all pl-9"
               />
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+              {activeTab === "signup" && email.includes("@") && !email.includes(".") && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-slate-900 border border-white/5 rounded-xl overflow-hidden shadow-xl shadow-black/40">
+                  {["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "protonmail.com"].map((domain) => {
+                    const full = email.split("@")[0] + "@" + domain;
+                    return (
+                      <button
+                        key={domain}
+                        type="button"
+                        onClick={() => setEmail(full)}
+                        className="w-full text-left px-3.5 py-2.5 text-xs text-slate-300 hover:bg-cyan-500/10 hover:text-white transition-all font-mono flex items-center gap-2"
+                      >
+                        <Mail className="w-3 h-3 text-cyan-400 shrink-0" />
+                        {full}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

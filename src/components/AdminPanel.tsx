@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   LayoutDashboard, Users, DollarSign, ShieldAlert, CheckCircle, XCircle, Search,
   Settings, Coins, BarChart3, TrendingUp, TrendingDown, Trophy,
@@ -16,6 +16,7 @@ import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, S
 import { Ticket } from "./SupportTicket";
 import { playCoinSound } from "../utils/coinSound";
 import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry } from "../utils/vpnDetector";
+import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 
 interface AdminPanelProps {
   user: UserProfile;
@@ -49,8 +50,8 @@ function PmEditModal({ data, onSave, onClose }: { data: WithdrawalMethodConfig; 
             <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Icon (emoji)</label><input value={icon} onChange={(e) => setIcon(e.target.value)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Min Coins</label><input type="number" value={minCoins} onChange={(e) => setMinCoins(parseInt(e.target.value) || 0)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
-            <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Max Coins</label><input type="number" value={maxCoins} onChange={(e) => setMaxCoins(parseInt(e.target.value) || 0)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Min Coins</label><input type="number" value={minCoins || ""} onChange={(e) => setMinCoins(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Max Coins</label><input type="number" value={maxCoins || ""} onChange={(e) => setMaxCoins(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
             <div><label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Fee %</label><input type="number" step="0.1" value={feePercent} onChange={(e) => setFeePercent(parseFloat(e.target.value) || 0)} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -403,18 +404,43 @@ function StatCard({ label, value, icon: Icon, color, trend, loading }: { label: 
 
 function LoadingRow() { return <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 animate-pulse flex items-center gap-4"><div className="w-9 h-9 rounded-xl bg-slate-800/60 shrink-0" /><div className="flex-1 space-y-2"><div className="h-3 w-32 bg-slate-800/60 rounded" /><div className="h-2 w-48 bg-slate-800/40 rounded" /></div><div className="h-6 w-16 bg-slate-800/40 rounded" /></div>; }
 
+const AdminBackBtn = ({ onClick }: { onClick: () => void }) => (
+  <button onClick={onClick} className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-white font-mono transition-colors cursor-pointer mb-3">
+    <ArrowLeft className="w-3.5 h-3.5" /> Back
+  </button>
+);
+
 const getAccounts = (): StoredAccount[] => { try { return JSON.parse(localStorage.getItem("coinloot_accounts") || "[]"); } catch { return []; } };
 const saveAccounts = (accounts: StoredAccount[]) => localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
 
 export default function AdminPanel({ user, onRewardEarned, activeSection: externalSection, onSectionChange }: AdminPanelProps) {
   const [internalSection, setInternalSection] = useState("dashboard");
   const activeSection = externalSection || internalSection;
-  const setActiveSection = onSectionChange || setInternalSection;
+  const rawSetSection = onSectionChange || setInternalSection;
+  const [sectionHistory, setSectionHistory] = useState<string[]>([]);
+  const setActiveSection = useCallback((s: string) => {
+    setSectionHistory(prev => {
+      const last = prev[prev.length - 1];
+      if (last !== activeSection) return [...prev, activeSection];
+      return prev;
+    });
+    rawSetSection(s);
+  }, [activeSection, rawSetSection]);
+  const goBack = useCallback(() => {
+    setSectionHistory(prev => {
+      if (prev.length === 0) { rawSetSection("dashboard"); return []; }
+      const newHist = [...prev];
+      const target = newHist.pop()!;
+      rawSetSection(target);
+      return newHist;
+    });
+  }, [rawSetSection]);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editCoins, setEditCoins] = useState(0);
   const [editUsd, setEditUsd] = useState(0);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [viewingKyc, setViewingKyc] = useState<any>(null);
 
   // ── Homepage Sections State ──
   const loadHomepageSections = () => {
@@ -436,6 +462,19 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [coinAmount, setCoinAmount] = useState(100);
   const [coinReason, setCoinReason] = useState("");
   const [coinTargetEmail, setCoinTargetEmail] = useState("");
+
+  // ── Global Notification State ──
+  const [globalNotifText, setGlobalNotifText] = useState(() => localStorage.getItem("coinloot_global_notif_text") || "");
+  const [globalNotifPromo, setGlobalNotifPromo] = useState(() => JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
+  const [globalNotifPromoCode, setGlobalNotifPromoCode] = useState(() => localStorage.getItem("coinloot_global_notif_promo_code") || "");
+  const [globalNotifPromoCoins, setGlobalNotifPromoCoins] = useState(() => parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
+  const loadDur = () => { try { const d = JSON.parse(localStorage.getItem("coinloot_global_notif_promo_duration") || "{}"); return d; } catch { return {}; } };
+  const [promoDurDays, setPromoDurDays] = useState(() => loadDur().days ?? 0);
+  const [promoDurHours, setPromoDurHours] = useState(() => loadDur().hours ?? 0);
+  const [promoDurMins, setPromoDurMins] = useState(() => loadDur().mins ?? 30);
+  const [promoDurSecs, setPromoDurSecs] = useState(() => loadDur().secs ?? 0);
+  const savePromoDur = (d: number, h: number, m: number, s: number) => localStorage.setItem("coinloot_global_notif_promo_duration", JSON.stringify({ days: d, hours: h, mins: m, secs: s }));
+  const globalNotifPromoText = globalNotifPromo && globalNotifPromoCode && globalNotifPromoCoins > 0;
 
   // ── Notifications State ──
   const [notifTitle, setNotifTitle] = useState("");
@@ -505,6 +544,45 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     try { const c = JSON.parse(localStorage.getItem("coinloot_telegram_config") || "{}"); return c.enabled !== false; } catch { return true; }
   });
 
+  // ── Database Config State ──
+  const [dbProjectName, setDbProjectName] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectName || ""; } catch { return ""; }
+  });
+  const [dbProjectUrl, setDbProjectUrl] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectUrl || ""; } catch { return ""; }
+  });
+  const [dbProjectId, setDbProjectId] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectId || ""; } catch { return ""; }
+  });
+  const [dbApiKey, setDbApiKey] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").apiKey || ""; } catch { return ""; }
+  });
+  const [dbTestResult, setDbTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [dbTesting, setDbTesting] = useState(false);
+  const [dbKeyVisible, setDbKeyVisible] = useState(false);
+
+  const testDbConnection = async () => {
+    setDbTesting(true);
+    setDbTestResult(null);
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const client = createClient(dbProjectUrl, dbApiKey, { realtime: { params: { eventsPerSecond: 10 } } });
+      const { data, error } = await client.from("_test_connection").select("*").limit(1).maybeSingle();
+      if (error && error.code === "42P01") {
+        setDbTestResult({ ok: true, msg: "Connected! Table not found (expected) — ready to run setup SQL." });
+      } else if (error && error.code === "PGRST301") {
+        setDbTestResult({ ok: true, msg: "Connected! (no rows returned — normal)" });
+      } else if (data !== null) {
+        setDbTestResult({ ok: true, msg: "Connected! Database is ready." });
+      } else {
+        setDbTestResult({ ok: true, msg: "Connected! Database is reachable." });
+      }
+    } catch (err: any) {
+      setDbTestResult({ ok: false, msg: err?.message || "Connection failed" });
+    }
+    setDbTesting(false);
+  };
+
   const testTelegram = async () => {
     const resp = await fetch("/api/telegram/send", {
       method: "POST",
@@ -531,6 +609,14 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (s.smtpPass) setSmtpPass(s.smtpPass);
     if (s.demoData !== undefined) setDemoData(s.demoData);
     if (s.developerMode !== undefined) setDeveloperMode(s.developerMode);
+    // Load database config
+    try {
+      const db = JSON.parse(localStorage.getItem("coinloot_db_config") || "{}");
+      if (db.projectName) setDbProjectName(db.projectName);
+      if (db.projectUrl) setDbProjectUrl(db.projectUrl);
+      if (db.projectId) setDbProjectId(db.projectId);
+      if (db.apiKey) setDbApiKey(db.apiKey);
+    } catch {}
     // Load telegram config
     try {
       const tc = JSON.parse(localStorage.getItem("coinloot_telegram_config") || "{}");
@@ -543,6 +629,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   const saveSettings = () => {
     localStorage.setItem("coinloot_site_settings", JSON.stringify({ siteName, rate, minWd, smtpHost, smtpPort, smtpUser, smtpPass, demoData, developerMode }));
+    localStorage.setItem("coinloot_db_config", JSON.stringify({ projectName: dbProjectName, projectUrl: dbProjectUrl, projectId: dbProjectId, apiKey: dbApiKey }));
     localStorage.setItem("coinloot_telegram_config", JSON.stringify({ token: telegramToken, chatId: telegramChatId, enabled: telegramEnabled }));
     addLog("SETTINGS_UPDATED", "settings", "site", "Updated site settings");
     showNotif("success", "Settings saved!");
@@ -561,6 +648,16 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [profilesRefreshKey, setProfilesRefreshKey] = useState(0);
   useEffect(() => { const i = setInterval(() => setCountdownTick(Date.now()), 1000); return () => clearInterval(i); }, []);
 
+  // ── Tickets State ──
+  const [ticketSelected, setTicketSelected] = useState<any | null>(null);
+  const [ticketReply, setTicketReply] = useState("");
+  const [ticketMsgs, setTicketMsgs] = useState<any[]>([]);
+  const [ticketList, setTicketList] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]"); } catch { return []; }
+  });
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketMsgs]);
+
   // ── Offerwall Providers State ──
   const [offerwallProviders, setOfferwallProviders] = useState<any[]>(() => {
     try {
@@ -569,21 +666,21 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     } catch { /* */ }
     return [
       // SURVEYS
-      { id: "prov-surveys-1", name: "CPX Research", slug: "cpx-research", initials: "CP", color: "from-purple-500 to-pink-600", category: "surveys", logoUrl: "https://logo.clearbit.com/cpxresearch.com", domain: "cpxresearch.com", apiKey: "sk_live_cpx_def456", publisherId: "PID-CP001", secretKey: "sk_secret_cpx_001", postbackUrl: "https://postback.coinloot.com/cpx", connected: true, apiConnected: false, priority: 10 },
-      { id: "prov-surveys-2", name: "BitLabs", slug: "bitlabs", initials: "BL", color: "from-indigo-500 to-violet-600", category: "surveys", logoUrl: "https://logo.clearbit.com/bitlabs.ai", domain: "bitlabs.ai", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/bitlabs", connected: false, apiConnected: false, priority: 20 },
+      { id: "prov-surveys-1", name: "CPX Research", slug: "cpx-research", initials: "CP", color: "from-purple-500 to-pink-600", category: "surveys", logoUrl: "/logos/cpxresearch.png", domain: "cpxresearch.com", apiKey: "sk_live_cpx_def456", publisherId: "PID-CP001", secretKey: "sk_secret_cpx_001", postbackUrl: "https://postback.coinloot.com/cpx", connected: true, apiConnected: false, priority: 10 },
+      { id: "prov-surveys-2", name: "BitLabs", slug: "bitlabs", initials: "BL", color: "from-indigo-500 to-violet-600", category: "surveys", logoUrl: "/logos/bitlabs.png", domain: "bitlabs.ai", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/bitlabs", connected: false, apiConnected: false, priority: 20 },
       // MAIN OFFERWALLS
-      { id: "prov-main-1", name: "TOROX", slug: "torox", initials: "TX", color: "from-cyan-500 to-blue-600", category: "main", logoUrl: "https://logo.clearbit.com/torox.com", domain: "torox.com", apiKey: "sk_live_tx_abc123", publisherId: "PID-TX001", secretKey: "sk_secret_tx_001", postbackUrl: "https://postback.coinloot.com/torox", connected: true, apiConnected: true, priority: 30 },
-      { id: "prov-main-2", name: "AdGate Media", slug: "adgate-media", initials: "AG", color: "from-amber-500 to-orange-600", category: "main", logoUrl: "https://logo.clearbit.com/adgatemedia.com", domain: "adgatemedia.com", apiKey: "sk_live_ag_ghi789", publisherId: "PID-AG001", secretKey: "sk_secret_ag_001", postbackUrl: "https://postback.coinloot.com/adgate", connected: true, apiConnected: true, priority: 40 },
-      { id: "prov-main-3", name: "AdGem", slug: "adgem", initials: "AG", color: "from-rose-500 to-red-600", category: "main", logoUrl: "https://logo.clearbit.com/adgem.com", domain: "adgem.com", apiKey: "sk_live_ag_mno345", publisherId: "PID-AG001", secretKey: "sk_secret_ag_002", postbackUrl: "https://postback.coinloot.com/adgem", connected: true, apiConnected: true, priority: 50 },
-      { id: "prov-main-4", name: "Lootably", slug: "lootably", initials: "LB", color: "from-emerald-500 to-teal-600", category: "main", logoUrl: "https://logo.clearbit.com/lootably.com", domain: "lootably.com", apiKey: "sk_live_lb_jkl012", publisherId: "PID-LB001", secretKey: "sk_secret_lb_001", postbackUrl: "https://postback.coinloot.com/lootably", connected: true, apiConnected: true, priority: 60 },
-      { id: "prov-main-5", name: "TimeWall", slug: "timewall", initials: "TW", color: "from-fuchsia-500 to-pink-600", category: "main", logoUrl: "https://logo.clearbit.com/timewall.io", domain: "timewall.io", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/timewall", connected: false, apiConnected: false, priority: 70 },
-      { id: "prov-main-6", name: "Revenue Universe", slug: "revenue-universe", initials: "RU", color: "from-sky-500 to-cyan-600", category: "main", logoUrl: "https://logo.clearbit.com/revenueuniverse.com", domain: "revenueuniverse.com", apiKey: "sk_live_ru_pqr678", publisherId: "PID-RU001", secretKey: "sk_secret_ru_001", postbackUrl: "https://postback.coinloot.com/revenueuniverse", connected: true, apiConnected: true, priority: 80 },
+      { id: "prov-main-1", name: "TOROX", slug: "torox", initials: "TX", color: "from-cyan-500 to-blue-600", category: "main", logoUrl: "/logos/torox.png", domain: "torox.com", apiKey: "sk_live_tx_abc123", publisherId: "PID-TX001", secretKey: "sk_secret_tx_001", postbackUrl: "https://postback.coinloot.com/torox", connected: true, apiConnected: true, priority: 30 },
+      { id: "prov-main-2", name: "AdGate Media", slug: "adgate-media", initials: "AG", color: "from-amber-500 to-orange-600", category: "main", logoUrl: "/logos/adgatemedia.png", domain: "adgatemedia.com", apiKey: "sk_live_ag_ghi789", publisherId: "PID-AG001", secretKey: "sk_secret_ag_001", postbackUrl: "https://postback.coinloot.com/adgate", connected: true, apiConnected: true, priority: 40 },
+      { id: "prov-main-3", name: "AdGem", slug: "adgem", initials: "AG", color: "from-rose-500 to-red-600", category: "main", logoUrl: "/logos/adgem.png", domain: "adgem.com", apiKey: "sk_live_ag_mno345", publisherId: "PID-AG001", secretKey: "sk_secret_ag_002", postbackUrl: "https://postback.coinloot.com/adgem", connected: true, apiConnected: true, priority: 50 },
+      { id: "prov-main-4", name: "Lootably", slug: "lootably", initials: "LB", color: "from-emerald-500 to-teal-600", category: "main", logoUrl: "/logos/lootably.png", domain: "lootably.com", apiKey: "sk_live_lb_jkl012", publisherId: "PID-LB001", secretKey: "sk_secret_lb_001", postbackUrl: "https://postback.coinloot.com/lootably", connected: true, apiConnected: true, priority: 60 },
+      { id: "prov-main-5", name: "TimeWall", slug: "timewall", initials: "TW", color: "from-fuchsia-500 to-pink-600", category: "main", logoUrl: "/logos/timewall.png", domain: "timewall.io", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/timewall", connected: false, apiConnected: false, priority: 70 },
+      { id: "prov-main-6", name: "Revenue Universe", slug: "revenue-universe", initials: "RU", color: "from-sky-500 to-cyan-600", category: "main", logoUrl: "/logos/revenueuniverse.png", domain: "revenueuniverse.com", apiKey: "sk_live_ru_pqr678", publisherId: "PID-RU001", secretKey: "sk_secret_ru_001", postbackUrl: "https://postback.coinloot.com/revenueuniverse", connected: true, apiConnected: true, priority: 80 },
       // MOBILE / APP INSTALL
-      { id: "prov-mobile-1", name: "Ayet Studios", slug: "ayet-studios", initials: "AY", color: "from-teal-500 to-emerald-600", category: "mobile", logoUrl: "https://logo.clearbit.com/ayetstudios.com", domain: "ayetstudios.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/ayet", connected: false, apiConnected: false, priority: 90 },
-      { id: "prov-mobile-2", name: "Kiwi Wall", slug: "kiwi-wall", initials: "KW", color: "from-lime-500 to-green-600", category: "mobile", logoUrl: "https://logo.clearbit.com/kiwiwall.com", domain: "kiwiwall.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/kiwiwall", connected: false, apiConnected: false, priority: 100 },
+      { id: "prov-mobile-1", name: "Ayet Studios", slug: "ayet-studios", initials: "AY", color: "from-teal-500 to-emerald-600", category: "mobile", logoUrl: "/logos/ayetstudios.png", domain: "ayetstudios.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/ayet", connected: false, apiConnected: false, priority: 90 },
+      { id: "prov-mobile-2", name: "Kiwi Wall", slug: "kiwi-wall", initials: "KW", color: "from-lime-500 to-green-600", category: "mobile", logoUrl: "/logos/kiwiwall.png", domain: "kiwiwall.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/kiwiwall", connected: false, apiConnected: false, priority: 100 },
       // EXTRA
-      { id: "prov-extra-1", name: "Monlix", slug: "monlix", initials: "MX", color: "from-orange-500 to-amber-600", category: "extra", logoUrl: "https://logo.clearbit.com/monlix.com", domain: "monlix.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/monlix", connected: false, apiConnected: false, priority: 110 },
-      { id: "prov-extra-2", name: "Wannads", slug: "wannads", initials: "WN", color: "from-pink-500 to-rose-600", category: "extra", logoUrl: "https://logo.clearbit.com/wannads.com", domain: "wannads.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/wannads", connected: false, apiConnected: false, priority: 120 },
+      { id: "prov-extra-1", name: "Monlix", slug: "monlix", initials: "MX", color: "from-orange-500 to-amber-600", category: "extra", logoUrl: "/logos/monlix.png", domain: "monlix.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/monlix", connected: false, apiConnected: false, priority: 110 },
+      { id: "prov-extra-2", name: "Wannads", slug: "wannads", initials: "WN", color: "from-pink-500 to-rose-600", category: "extra", logoUrl: "/logos/wannads.png", domain: "wannads.com", apiKey: "", publisherId: "", secretKey: "", postbackUrl: "https://postback.coinloot.com/wannads", connected: false, apiConnected: false, priority: 120 },
     ];
   });
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
@@ -1102,35 +1199,120 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                 })}
               </div>
             </div>
-            {/* Notifications */}
+            {/* Global Notification */}
             <div className="bg-slate-950/40 p-4 lg:p-5 rounded-3xl border border-white/5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xs font-bold text-white flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 text-cyan-400" /> Notifications</h3>
-                <span className="text-[8px] font-mono text-slate-500">{allNotifs.filter((n) => n.unread).length} unread</span>
-              </div>
-              <div className="space-y-1 max-h-[200px] overflow-y-auto scrollbar-thin">
-                {recentNotifs.length > 0 ? recentNotifs.slice(0, 6).map((n: any) => (
-                  <div key={n.id} className="flex items-start gap-2.5 p-2 rounded-xl hover:bg-slate-900/40 transition-all">
-                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${n.category === "credit" ? "bg-emerald-500/10 border border-emerald-500/20" : n.category === "withdrawal_status" ? "bg-amber-500/10 border border-amber-500/20" : n.category === "security_alert" ? "bg-rose-500/10 border border-rose-500/20" : "bg-cyan-500/10 border border-cyan-500/20"}`}>
-                      <Bell className={`w-3 h-3 ${n.category === "credit" ? "text-emerald-400" : n.category === "withdrawal_status" ? "text-amber-400" : n.category === "security_alert" ? "text-rose-400" : "text-cyan-400"}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-semibold text-white truncate">{n.title}</span>
-                        {n.unread && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />}
+              <h3 className="text-xs font-bold text-white flex items-center gap-1.5 mb-3"><Megaphone className="w-3.5 h-3.5 text-cyan-400" /> Global Notification</h3>
+              <div className="space-y-3">
+                <textarea value={globalNotifText} onChange={(e) => { setGlobalNotifText(e.target.value); localStorage.setItem("coinloot_global_notif_text", e.target.value); }} placeholder="Type notification for all users..." rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600 font-mono resize-none focus:outline-none focus:border-cyan-500/20" />
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={globalNotifPromo} onChange={(e) => { setGlobalNotifPromo(e.target.checked); localStorage.setItem("coinloot_global_notif_promo_enabled", JSON.stringify(e.target.checked)); }} className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-600 accent-cyan-500" />
+                  <span className="text-[9px] text-slate-400 font-mono">Attach Promo Code</span>
+                </label>
+                {globalNotifPromo && (
+                  <div className="space-y-2 pl-4 border-l border-cyan-500/20">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Promo Code</label>
+                        <input value={globalNotifPromoCode} onChange={(e) => { setGlobalNotifPromoCode(e.target.value); localStorage.setItem("coinloot_global_notif_promo_code", e.target.value); }} placeholder="BONUS100" className="w-full bg-slate-950 border border-white/5 rounded-xl px-2.5 py-1.5 text-[10px] text-white font-mono uppercase focus:outline-none focus:border-cyan-500/20" />
                       </div>
-                      <p className="text-[8px] text-slate-400 mt-0.5 truncate">{n.description}</p>
+                      <div>
+                        <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Coin Value</label>
+                        <input type="number" value={globalNotifPromoCoins || ""} onChange={(e) => { const v = e.target.value === "" ? 0 : parseInt(e.target.value) || 0; setGlobalNotifPromoCoins(v); localStorage.setItem("coinloot_global_notif_promo_coins", String(v)); }} placeholder="500" className="w-full bg-slate-950 border border-white/5 rounded-xl px-2.5 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+                      </div>
                     </div>
+                    <div>
+                      <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Duration</label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <div><input type="number" min={0} value={promoDurDays || ""} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value) || 0); setPromoDurDays(v); savePromoDur(v, promoDurHours, promoDurMins, promoDurSecs); }} placeholder="0" className="w-full bg-slate-950 border border-white/5 rounded-xl px-1.5 py-1.5 text-[9px] text-white font-mono text-center focus:outline-none focus:border-cyan-500/20" /><span className="block text-[7px] text-slate-600 font-mono text-center mt-0.5">Days</span></div>
+                        <div><input type="number" min={0} max={23} value={promoDurHours || ""} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.min(23, Math.max(0, parseInt(e.target.value) || 0)); setPromoDurHours(v); savePromoDur(promoDurDays, v, promoDurMins, promoDurSecs); }} placeholder="0" className="w-full bg-slate-950 border border-white/5 rounded-xl px-1.5 py-1.5 text-[9px] text-white font-mono text-center focus:outline-none focus:border-cyan-500/20" /><span className="block text-[7px] text-slate-600 font-mono text-center mt-0.5">Hours</span></div>
+                        <div><input type="number" min={0} max={59} value={promoDurMins || ""} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.min(59, Math.max(0, parseInt(e.target.value) || 0)); setPromoDurMins(v); savePromoDur(promoDurDays, promoDurHours, v, promoDurSecs); }} placeholder="30" className="w-full bg-slate-950 border border-white/5 rounded-xl px-1.5 py-1.5 text-[9px] text-white font-mono text-center focus:outline-none focus:border-cyan-500/20" /><span className="block text-[7px] text-slate-600 font-mono text-center mt-0.5">Mins</span></div>
+                        <div><input type="number" min={0} max={59} value={promoDurSecs || ""} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.min(59, Math.max(0, parseInt(e.target.value) || 0)); setPromoDurSecs(v); savePromoDur(promoDurDays, promoDurHours, promoDurMins, v); }} placeholder="0" className="w-full bg-slate-950 border border-white/5 rounded-xl px-1.5 py-1.5 text-[9px] text-white font-mono text-center focus:outline-none focus:border-cyan-500/20" /><span className="block text-[7px] text-slate-600 font-mono text-center mt-0.5">Secs</span></div>
+                      </div>
+                    </div>
+                    {globalNotifPromoText && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <Gift className="w-3 h-3 text-amber-400" />
+                        <span className="text-[9px] text-amber-300 font-mono">Active promo: {globalNotifPromoCode} · {globalNotifPromoCoins} coins · {promoDurDays}d {promoDurHours}h {promoDurMins}m {promoDurSecs}s</span>
+                      </div>
+                    )}
                   </div>
-                )) : (
-                  <p className="text-[10px] text-slate-500 text-center py-4">No notifications yet</p>
                 )}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => {
+                    const ts = Date.now();
+                    localStorage.setItem("coinloot_global_notif_sent_at", String(ts));
+                    showNotif("success", "Global notification sent to all users");
+                    addLog("GLOBAL_NOTIF_SENT", "notification", "all", `Sent: ${globalNotifText}`);
+                  }} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                    <Send className="w-3 h-3" /> Send Notification
+                  </button>
+                  <button onClick={() => {
+                    const notifId = `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+                    try {
+                      const allAccs = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+                      allAccs.forEach((a: any) => {
+                        const userNotifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+                        userNotifs.unshift({ id: `${notifId}-${a.profile.id}`, title: globalNotifText ? "📢 Announcement" : "🎉 Promo Event", description: globalNotifText || `Use code ${globalNotifPromoCode} to earn ${globalNotifPromoCoins} coins!`, time: new Date().toISOString(), category: "system", unread: true, coinsEarned: 0 });
+                        localStorage.setItem("coinloot_notifications", JSON.stringify(userNotifs));
+                      });
+                    } catch {}
+                    localStorage.setItem("coinloot_global_notif_sent_at", String(Date.now()));
+                    showNotif("success", "Broadcast sent to all users");
+                    addLog("GLOBAL_NOTIF_BROADCAST", "notification", "all", `Broadcast: ${globalNotifText || globalNotifPromoCode}`);
+                  }} className="flex-1 py-2.5 rounded-xl bg-purple-500/10 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                    <Megaphone className="w-3 h-3" /> Broadcast All
+                  </button>
+                </div>
               </div>
-              <button onClick={() => setActiveSection("notifications")} className="w-full mt-3 py-2 rounded-xl border border-white/5 text-[9px] font-mono text-slate-500 hover:text-cyan-400 hover:border-cyan-500/20 transition-all cursor-pointer flex items-center justify-center gap-1">
-                <Bell className="w-3 h-3" /> Manage
-              </button>
             </div>
           </div>
+
+          {/* Developer Mode - Restrictions Overview */}
+          {developerMode && (
+            <div className="bg-slate-950/40 p-4 lg:p-5 rounded-3xl border border-amber-500/20 mt-4">
+              <div className="flex items-center gap-2 mb-4">
+                <ShieldAlert className="w-4 h-4 text-amber-400" />
+                <span className="text-[10px] font-bold font-mono text-amber-400 uppercase tracking-widest">Developer Mode — Restrictions</span>
+                <span className="ml-auto text-[8px] px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 font-mono font-bold">ACTIVE</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <div className="p-3 rounded-xl bg-rose-500/5 border border-rose-500/20 text-center">
+                  <span className="block text-lg font-bold text-rose-400">{bannedUsers.length}</span>
+                  <span className="text-[8px] text-slate-400 font-mono">Banned Users</span>
+                </div>
+                <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-center">
+                  <span className="block text-lg font-bold text-amber-400">{restrictedUsers.length}</span>
+                  <span className="text-[8px] text-slate-400 font-mono">Restricted Users</span>
+                </div>
+                <div className="p-3 rounded-xl bg-cyan-500/5 border border-cyan-500/20 text-center">
+                  <span className="block text-lg font-bold text-cyan-400">{flaggedUsers.length}</span>
+                  <span className="text-[8px] text-slate-400 font-mono">VPN Flagged</span>
+                </div>
+                <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 text-center">
+                  <span className="block text-lg font-bold text-purple-400">{detectionHistory.length}</span>
+                  <span className="text-[8px] text-slate-400 font-mono">Detection Events</span>
+                </div>
+              </div>
+              {(restrictedUsers.length > 0) && (
+                <div className="space-y-1.5 max-h-[180px] overflow-y-auto scrollbar-thin">
+                  <span className="text-[8px] text-slate-500 font-mono font-semibold uppercase tracking-wider">Currently Restricted Users</span>
+                  {restrictedUsers.map((ru: any) => {
+                    const profile = profiles.find((p: any) => p.id === ru.userId);
+                    const remaining = ru.restrictedUntil ? Math.max(0, Math.floor((new Date(ru.restrictedUntil).getTime() - Date.now()) / 60000)) : 0;
+                    return (
+                      <div key={ru.userId} className="flex items-center justify-between p-2 rounded-xl bg-amber-500/5 border border-amber-500/10">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-white">{profile?.username || "Unknown"}</span>
+                          {remaining > 0 && <span className="text-[8px] font-mono text-amber-400">{remaining}m remaining</span>}
+                        </div>
+                        <span className="text-[8px] font-mono text-slate-500">{ru.reason || "No reason"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -1139,6 +1321,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (section === "users" || section === "users-all") {
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h1 className="text-xl lg:text-2xl font-bold text-white">User Management</h1>
             <div className="relative flex-1 max-w-xs">
@@ -1302,14 +1485,25 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         reader.readAsDataURL(file);
       };
       const handleLogoReset = (name: string) => {
-        const domain = offerwallProviders.find((p) => p.name === name)?.domain;
-        const fallbackUrl = domain ? `https://logo.clearbit.com/${domain}` : "";
-        saveProviders(offerwallProviders.map((p) => p.name === name ? { ...p, logoUrl: fallbackUrl } : p));
+        const slugMap: Record<string, string> = {
+          "CPX Research": "/logos/cpxresearch.png", "BitLabs": "/logos/bitlabs.png",
+          "TOROX": "/logos/torox.png", "AdGate Media": "/logos/adgatemedia.png",
+          "AdGem": "/logos/adgem.png", "Lootably": "/logos/lootably.png",
+          "TimeWall": "/logos/timewall.png", "Revenue Universe": "/logos/revenueuniverse.png",
+          "GemiAd": "/logos/gemiad.png", "AdswedMedia": "/logos/adswedmedia.png",
+          "PixyLabs": "/logos/pixylabs.png", "PubScale": "/logos/pubscale.png",
+          "RadientWall": "/logos/radientwall.png", "Tplayad": "/logos/tplayad.png",
+          "Ayet Studios": "/logos/ayetstudios.png", "Kiwi Wall": "/logos/kiwiwall.png",
+          "Monlix": "/logos/monlix.png",
+        };
+        const logoUrl = slugMap[name] || "";
+        saveProviders(offerwallProviders.map((p) => p.name === name ? { ...p, logoUrl } : p));
         showNotif("success", `Logo reset for ${name}`);
       };
       const categoryColors: Record<string, string> = { surveys: "from-purple-500/20 to-pink-600/20 border-purple-500/20 text-purple-300", main: "from-cyan-500/20 to-blue-600/20 border-cyan-500/20 text-cyan-300", mobile: "from-teal-500/20 to-emerald-600/20 border-teal-500/20 text-teal-300", extra: "from-orange-500/20 to-amber-600/20 border-orange-500/20 text-orange-300" };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h1 className="text-xl lg:text-2xl font-bold text-white">Offerwall Providers & APIs</h1>
@@ -1536,6 +1730,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h1 className="text-xl lg:text-2xl font-bold text-white">Offers Management</h1>
             <button onClick={() => setShowAddOffer(!showAddOffer)} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer">
@@ -1552,7 +1747,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                 <select value={newOffer.provider} onChange={(e) => setNewOffer({ ...newOffer, provider: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
                   {offerwallProviders.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
                 </select>
-                <input type="number" value={newOffer.payout} onChange={(e) => setNewOffer({ ...newOffer, payout: parseInt(e.target.value) || 0 })} placeholder="Payout coins" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
+                <input type="number" value={newOffer.payout || ""} onChange={(e) => setNewOffer({ ...newOffer, payout: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Payout coins" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
                 <select value={newOffer.difficulty} onChange={(e) => setNewOffer({ ...newOffer, difficulty: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
                   <option value="Easy">Easy</option>
                   <option value="Medium">Medium</option>
@@ -1631,6 +1826,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Locked Offer Rules</h1>
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
             <h3 className="text-sm font-bold text-white mb-4">Create Unlock Rule</h3>
@@ -1641,7 +1837,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                 <option value="level">Min Level</option>
                 <option value="tasks_completed">Min Tasks</option>
               </select>
-              <input type="number" value={newRule.value} onChange={(e) => setNewRule({ ...newRule, value: parseInt(e.target.value) || 0 })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
+              <input type="number" value={newRule.value || ""} onChange={(e) => setNewRule({ ...newRule, value: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
               <button onClick={addRule} className="py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer"><Plus className="w-3 h-3 inline mr-1" /> Add Rule</button>
             </div>
           </div>
@@ -1664,6 +1860,11 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
+    // ═══ LOCKED OFFERWALL MANAGEMENT ═══
+    if (section === "locked-offers-management" || section === "locked-offers-promos") {
+      return <AdminLockedOfferwalls section={section} onBack={goBack} showNotif={showNotif} />;
+    }
+
     // ═══ COINS & REWARDS ═══
     if (section === "coins") {
       const handleBonusAll = () => {
@@ -1682,13 +1883,14 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Coins & Rewards</h1>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
               <h3 className="text-sm font-bold text-white flex items-center gap-2"><Plus className="w-4 h-4 text-emerald-400" /> Add / Deduct Coins</h3>
               <input value={coinTargetEmail} onChange={(e) => setCoinTargetEmail(e.target.value)} placeholder="User email..." className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
               <div className="flex gap-2">
-                <input type="number" value={coinAmount} onChange={(e) => setCoinAmount(parseInt(e.target.value) || 0)} className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
+                <input type="number" value={coinAmount || ""} onChange={(e) => setCoinAmount(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
                 <input value={coinReason} onChange={(e) => setCoinReason(e.target.value)} placeholder="Reason..." className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
               </div>
               <div className="flex gap-2">
@@ -1699,7 +1901,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
               <h3 className="text-sm font-bold text-white flex items-center gap-2"><Gift className="w-4 h-4 text-purple-400" /> Bonus All Users</h3>
               <div className="flex gap-2">
-                <input type="number" value={coinAmount} onChange={(e) => setCoinAmount(parseInt(e.target.value) || 0)} className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
+                <input type="number" value={coinAmount || ""} onChange={(e) => setCoinAmount(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
                 <button onClick={handleBonusAll} className="flex-1 py-2 rounded-xl bg-gradient-to-r from-purple-500/20 to-pink-600/20 text-purple-300 border border-purple-500/20 text-[10px] font-bold hover:from-purple-500/30 transition-all cursor-pointer"><Send className="w-3 h-3 inline mr-1" /> Send to All</button>
               </div>
             </div>
@@ -1712,6 +1914,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (section === "withdrawals" || section === "withdrawals-all") {
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Withdrawal Requests</h1>
           <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
             <div className="overflow-x-auto">
@@ -1790,6 +1993,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <div className="flex items-center justify-between">
             <h1 className="text-xl lg:text-2xl font-bold text-white">Payment Methods</h1>
             <button onClick={() => setPmModal({ mode: "add", data: { id: `pm-${Date.now()}`, name: "", icon: "💳", minCoins: 1000, maxCoins: 50000, feePercent: 0, apiConnected: false, status: "INACTIVE", apiCredentials: "" } })}
@@ -1865,6 +2069,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Send Notification</h1>
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4 max-w-lg">
             <input value={notifTitle} onChange={(e) => setNotifTitle(e.target.value)} placeholder="Notification title..." className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
@@ -1940,16 +2145,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       };
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Promo Codes</h1>
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3 max-w-lg">
             <div className="flex gap-2">
-              <input value={newCode.code} onChange={(e) => setNewCode({ ...newCode, code: e.target.value })} placeholder="PROMO-CODE" className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
-              <button onClick={() => setNewCode({ ...newCode, code: generateCode() })} className="px-3 py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] cursor-pointer"><RefreshCw className="w-3 h-3" /></button>
+              <input value={newCode.code} onChange={(e) => setNewCode({ ...newCode, code: e.target.value })} placeholder="PROMO-CODE" className="flex-1 min-w-0 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
+              <button onClick={() => setNewCode({ ...newCode, code: generateCode() })} className="shrink-0 px-3 py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] cursor-pointer"><RefreshCw className="w-3 h-3" /></button>
             </div>
-            <div className="flex gap-2">
-              <input type="number" value={newCode.coins} onChange={(e) => setNewCode({ ...newCode, coins: parseInt(e.target.value) || 0 })} placeholder="Coins" className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
-              <input type="number" value={newCode.maxUses} onChange={(e) => setNewCode({ ...newCode, maxUses: parseInt(e.target.value) || 0 })} placeholder="Max Uses" className="w-24 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
-              <button onClick={addCode} className="flex-1 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold cursor-pointer"><Plus className="w-3 h-3 inline mr-1" /> Create</button>
+            <div className="flex flex-col xs:flex-row gap-2">
+              <input type="number" value={newCode.coins || ""} onChange={(e) => setNewCode({ ...newCode, coins: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Coins" className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
+              <input type="number" value={newCode.maxUses || ""} onChange={(e) => setNewCode({ ...newCode, maxUses: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Max Uses" className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
+              <button onClick={addCode} className="shrink-0 py-2 px-4 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold cursor-pointer"><Plus className="w-3 h-3 inline mr-1" /> Create</button>
             </div>
           </div>
           <div className="space-y-2">
@@ -1976,6 +2182,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const refUsers = profiles.filter((p) => p.referrals_count > 0).sort((a, b) => b.referrals_count - a.referrals_count);
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Referral Statistics</h1>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5"><span className="block text-2xl font-bold font-mono text-white">{profiles.filter((p) => p.referred_by).length}</span><span className="block text-[10px] text-slate-400 font-mono uppercase mt-1">Referred Users</span></div>
@@ -1999,67 +2206,61 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
     // ═══ TICKETS ═══
     if (section === "tickets") {
-      const allTickets: Ticket[] = (() => {
-        try { return JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]"); } catch { return []; }
-      })();
-      const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-      const [adminReply, setAdminReply] = useState("");
-      const [ticketMessages, setTicketMessages] = useState<any[]>([]);
-      const [ticketList, setTicketList] = useState(allTickets);
-      const chatEndRef = useRef<HTMLDivElement>(null);
-
-      useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketMessages]);
-
-      const openTicket = (t: Ticket) => {
-        setSelectedTicket(t);
+      const openTicket = (t: any) => {
+        setTicketSelected(t);
         try {
           const msgs = JSON.parse(localStorage.getItem(`coinloot_support_tickets_messages_${t.id}`) || "[]");
-          setTicketMessages(msgs);
-        } catch { setTicketMessages([]); }
+          setTicketMsgs(msgs);
+        } catch { setTicketMsgs([]); }
       };
 
-      const handleAdminReply = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!adminReply.trim() || !selectedTicket) return;
-        const now = new Date().toISOString();
-        const msg = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          ticketId: selectedTicket.id,
-          senderId: user.id,
-          senderName: user.username,
-          senderRole: "admin",
-          text: adminReply,
-          createdAt: now,
-        };
-        const updatedMessages = [...ticketMessages, msg];
-        setTicketMessages(updatedMessages);
-        localStorage.setItem(`coinloot_support_tickets_messages_${selectedTicket.id}`, JSON.stringify(updatedMessages));
-
-        // Update ticket status
-        if (selectedTicket.status === "OPEN") {
-          const updatedTickets = ticketList.map((t) => t.id === selectedTicket.id ? { ...t, status: "ANSWERED" as const } : t);
-          setTicketList(updatedTickets);
-          localStorage.setItem("coinloot_support_tickets", JSON.stringify(updatedTickets));
-          setSelectedTicket({ ...selectedTicket, status: "ANSWERED" });
-        }
-        setAdminReply("");
-      };
-
-      const backTo = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setSelectedTicket(null);
+      const refreshTicketList = () => {
         try {
           const refreshed = JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]");
           setTicketList(refreshed);
         } catch {}
       };
 
-      if (selectedTicket) {
-        const ticket = selectedTicket;
+      const handleAdminReply = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!ticketReply.trim() || !ticketSelected) return;
+        const now = new Date().toISOString();
+        const msg = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          ticketId: ticketSelected.id,
+          senderId: user.id,
+          senderName: user.username,
+          senderRole: "admin",
+          text: ticketReply,
+          createdAt: now,
+        };
+        const updatedMessages = [...ticketMsgs, msg];
+        setTicketMsgs(updatedMessages);
+        localStorage.setItem(`coinloot_support_tickets_messages_${ticketSelected.id}`, JSON.stringify(updatedMessages));
+
+        if (ticketSelected.status === "OPEN") {
+          const updatedTickets = ticketList.map((t: any) => t.id === ticketSelected.id ? { ...t, status: "ANSWERED" } : t);
+          setTicketList(updatedTickets);
+          localStorage.setItem("coinloot_support_tickets", JSON.stringify(updatedTickets));
+          setTicketSelected({ ...ticketSelected, status: "ANSWERED" });
+        }
+        setTicketReply("");
+      };
+
+      const updateTicketStatus = (status: string) => {
+        if (!ticketSelected) return;
+        const updatedTickets = ticketList.map((t: any) => t.id === ticketSelected.id ? { ...t, status } : t);
+        setTicketList(updatedTickets);
+        localStorage.setItem("coinloot_support_tickets", JSON.stringify(updatedTickets));
+        setTicketSelected({ ...ticketSelected, status });
+      };
+
+      if (ticketSelected) {
+        const ticket = ticketSelected;
         return (
           <div className="p-4 lg:p-6 h-full flex flex-col max-w-3xl mx-auto w-full">
             <div className="flex items-center gap-3 mb-4">
-              <button onClick={backTo} className="p-2 rounded-xl bg-slate-800/60 border border-white/5 text-slate-400 hover:text-white transition-all cursor-pointer"><ArrowLeft className="w-4 h-4" /></button>
+              <button onClick={() => { setTicketSelected(null); refreshTicketList(); }} className="p-2 rounded-xl bg-slate-800/60 border border-white/5 text-slate-400 hover:text-white transition-all cursor-pointer"><ArrowLeft className="w-4 h-4" /></button>
               <div className="flex-1 min-w-0">
                 <h2 className="text-sm font-bold text-white truncate">{ticket.subject}</h2>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -2068,14 +2269,15 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                   <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold font-mono ${
                     ticket.status === "OPEN" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
                     ticket.status === "ANSWERED" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" :
-                    "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    ticket.status === "RESOLVED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                    "bg-slate-500/10 text-slate-400 border border-slate-500/20"
                   }`}>{ticket.status}</span>
                 </div>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 mb-3" style={{ maxHeight: "calc(100vh - 280px)" }}>
-              {ticketMessages.map((msg: any) => (
+              {ticketMsgs.map((msg: any) => (
                 <div key={msg.id} className={`flex ${msg.senderRole === "admin" ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 ${
                     msg.senderRole === "admin"
@@ -2098,9 +2300,18 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               <div ref={chatEndRef} />
             </div>
 
+            <div className="flex items-center gap-2 mb-3">
+              {ticket.status !== "RESOLVED" && ticket.status !== "CLOSED" && (
+                <button onClick={() => updateTicketStatus("RESOLVED")} className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[8px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer"><CheckCircle className="w-3 h-3 inline mr-1" /> Resolve</button>
+              )}
+              {ticket.status !== "CLOSED" && (
+                <button onClick={() => updateTicketStatus("CLOSED")} className="px-3 py-1.5 rounded-xl bg-slate-500/10 text-slate-300 border border-slate-500/20 text-[8px] font-bold hover:bg-slate-500/20 transition-all cursor-pointer"><XCircle className="w-3 h-3 inline mr-1" /> Close</button>
+              )}
+            </div>
+
             <form onSubmit={handleAdminReply} className="flex items-center gap-2 glass rounded-2xl p-2 border border-white/5">
-              <input type="text" value={adminReply} onChange={(e) => setAdminReply(e.target.value)} placeholder="Type your reply..." className="flex-1 bg-transparent border-none px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none" />
-              <button type="submit" disabled={!adminReply.trim()} className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white disabled:opacity-40 transition-all cursor-pointer disabled:cursor-not-allowed">
+              <input type="text" value={ticketReply} onChange={(e) => setTicketReply(e.target.value)} placeholder="Type your reply..." className="flex-1 bg-transparent border-none px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none" />
+              <button type="submit" disabled={!ticketReply.trim() || ticket.status === "CLOSED"} className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white disabled:opacity-40 transition-all cursor-pointer disabled:cursor-not-allowed">
                 <Send className="w-4 h-4" />
               </button>
             </form>
@@ -2110,6 +2321,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <div className="flex items-center justify-between">
             <h1 className="text-xl lg:text-2xl font-bold text-white">Support Tickets</h1>
             <span className="px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-mono font-bold border border-cyan-500/20">{ticketList.length} total</span>
@@ -2123,7 +2335,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
           )}
 
           <div className="space-y-2">
-            {ticketList.map((ticket) => (
+            {ticketList.map((ticket: any) => (
               <button key={ticket.id} onClick={() => openTicket(ticket)} className="w-full text-left glass rounded-2xl p-4 hover:border-cyan-400/30 transition-all border border-white/5 cursor-pointer group">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -2131,7 +2343,8 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold font-mono ${
                         ticket.status === "OPEN" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
                         ticket.status === "ANSWERED" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" :
-                        "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        ticket.status === "RESOLVED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                        "bg-slate-500/10 text-slate-400 border border-slate-500/20"
                       }`}>{ticket.status}</span>
                       <span className="text-[9px] text-slate-600 font-mono">{new Date(ticket.createdAt).toLocaleDateString()}</span>
                     </div>
@@ -2159,6 +2372,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const countryData = Array.from(countryMap.entries()).sort((a, b) => b[1] - a[1]);
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Analytics</h1>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
@@ -2195,6 +2409,190 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
+    // ═══ KYC MANAGEMENT ═══
+    if (section === "kyc") {
+      const kycUsers = profiles.filter(p => p.kyc_status === "PENDING" || p.kyc_status === "APPROVED" || p.kyc_status === "REJECTED");
+      const pendingKyc = profiles.filter(p => p.kyc_status === "PENDING");
+      const approvedKyc = profiles.filter(p => p.kyc_status === "APPROVED");
+      const rejectedKyc = profiles.filter(p => p.kyc_status === "REJECTED");
+
+      const handleKycAction = (userId: string, action: "APPROVED" | "REJECTED") => {
+        const stored = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+        const idx = stored.findIndex((a: any) => a.profile?.id === userId);
+        if (idx >= 0) {
+          stored[idx].profile.kyc_status = action;
+          localStorage.setItem("coinloot_accounts", JSON.stringify(stored));
+        }
+        const profilesRaw = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
+        const pIdx = profilesRaw.findIndex((p: any) => p.id === userId);
+        if (pIdx >= 0) {
+          profilesRaw[pIdx].kyc_status = action;
+          localStorage.setItem("coinloot_user_profiles", JSON.stringify(profilesRaw));
+        }
+        setProfilesRefreshKey(k => k + 1);
+        showNotif("success", `KYC ${action} for user`);
+      };
+
+      const viewKycDoc = (userId: string) => {
+        const data = localStorage.getItem(`coinloot_kyc_${userId}`);
+        if (data) {
+          const parsed = JSON.parse(data);
+          setViewingKyc(parsed);
+        } else {
+          showNotif("error", "No KYC documents found for this user");
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-bold text-white">KYC Verification</h2>
+            <p className="text-xs text-slate-400 mt-1">Manage user identity verification requests.</p>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Total", value: kycUsers.length, color: "text-white" },
+              { label: "Pending", value: pendingKyc.length, color: "text-amber-400" },
+              { label: "Approved", value: approvedKyc.length, color: "text-emerald-400" },
+              { label: "Rejected", value: rejectedKyc.length, color: "text-rose-400" },
+            ].map((s, i) => (
+              <div key={i} className="bg-slate-950/40 p-4 rounded-2xl border border-white/5">
+                <span className={`block text-2xl font-bold font-mono ${s.color}`}>{s.value}</span>
+                <span className="text-[9px] text-slate-500 font-mono">{s.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Pending Requests */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-4 border-b border-white/5 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" /> Pending Verification
+              </h3>
+              <span className="px-2 py-0.5 text-[9px] rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">{pendingKyc.length} pending</span>
+            </div>
+            {pendingKyc.length === 0 ? (
+              <div className="p-8 text-center">
+                <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                <p className="text-xs text-slate-500">No pending KYC requests</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {pendingKyc.map((u) => (
+                  <div key={u.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                        {u.username[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="block text-sm font-semibold text-white truncate">{u.username}</span>
+                        <span className="block text-[9px] text-slate-500 font-mono truncate">{u.email} — {u.country || "N/A"}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => viewKycDoc(u.id)} className="px-3 py-1.5 rounded-xl bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">View Docs</button>
+                      <button onClick={() => handleKycAction(u.id, "APPROVED")} className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-[9px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Approve</button>
+                      <button onClick={() => handleKycAction(u.id, "REJECTED")} className="px-3 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-[9px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer flex items-center gap-1"><XCircle className="w-3 h-3" /> Reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* All KYC Users */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-4 border-b border-white/5">
+              <h3 className="text-sm font-bold text-white">All KYC Records</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-white/5 text-[9px] text-slate-500 font-mono uppercase">
+                    <th className="text-left p-3 font-medium">User</th>
+                    <th className="text-left p-3 font-medium">Email</th>
+                    <th className="text-left p-3 font-medium">Status</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kycUsers.map((u) => (
+                    <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center text-[8px] font-bold text-white">{u.username[0].toUpperCase()}</div>
+                          <span className="font-semibold text-white">{u.username}</span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-slate-400">{u.email}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                          u.kyc_status === "APPROVED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                          u.kyc_status === "REJECTED" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" :
+                          "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                        }`}>{u.kyc_status}</span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button onClick={() => viewKycDoc(u.id)} className="px-2 py-1 rounded-lg bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">Docs</button>
+                          {u.kyc_status === "PENDING" && (
+                            <>
+                              <button onClick={() => handleKycAction(u.id, "APPROVED")} className="px-2 py-1 rounded-lg bg-emerald-500/15 text-[9px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer">Approve</button>
+                              <button onClick={() => handleKycAction(u.id, "REJECTED")} className="px-2 py-1 rounded-lg bg-rose-500/15 text-[9px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer">Reject</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* KYC Document Viewer Modal */}
+          {viewingKyc && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+              <div className="max-w-2xl w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-bold text-white">KYC Documents</h3>
+                  <button onClick={() => setViewingKyc(null)} className="text-slate-400 hover:text-white transition-all cursor-pointer"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {viewingKyc.docFront && (
+                    <div>
+                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Front Side</span>
+                      <img src={viewingKyc.docFront} alt="Front" className="w-full rounded-2xl border border-white/10" />
+                    </div>
+                  )}
+                  {viewingKyc.docBack && (
+                    <div>
+                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Back Side</span>
+                      <img src={viewingKyc.docBack} alt="Back" className="w-full rounded-2xl border border-white/10" />
+                    </div>
+                  )}
+                  {viewingKyc.selfie && (
+                    <div className={viewingKyc.docBack ? "" : "sm:col-span-2"}>
+                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Selfie</span>
+                      <img src={viewingKyc.selfie} alt="Selfie" className="w-full max-w-xs rounded-2xl border border-white/10" />
+                    </div>
+                  )}
+                </div>
+                {viewingKyc.docType && (
+                  <p className="text-[10px] text-slate-400 mt-4 font-mono">Document Type: {viewingKyc.docType}</p>
+                )}
+                {viewingKyc.submittedAt && (
+                  <p className="text-[9px] text-slate-500 mt-1 font-mono">Submitted: {new Date(viewingKyc.submittedAt).toLocaleString()}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // ═══ SECURITY ═══
     if (section === "security" || section === "fraud" || section === "logs" || section === "vpn-control") {
       const logs = getLogs();
@@ -2211,6 +2609,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
       return (
         <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Security</h1>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
             {section !== "logs" && (
@@ -2281,9 +2680,8 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
-    // ═══ HOMEPAGE — Earn Page Sections + Announcements & Promo ═══
+    // ═══ HOMEPAGE — Earn Page Sections ═══
     if (section === "homepage") {
-      // ── Earn Page Section Visibility ──
       const toggleSection = (key: string) => {
         const updated = { ...homepageSections, [key]: !homepageSections[key] };
         setHomepageSections(updated);
@@ -2296,196 +2694,48 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         { key: "surveys", label: "Surveys", icon: ClipboardCheck, desc: "Show the Surveys section on the earn page" },
         { key: "offerwalls", label: "Offerwall Providers", icon: ShieldCheck, desc: "Show the Offerwall Providers grid on the earn page" },
       ];
-
-      // ── Announcements & Promo State ──
-      const defaultAnnouncements = {
-        announcement1: { enabled: true, title: "Welcome to CoinLoot", description: "Complete offers and earn real rewards. Start your earning journey today!", icon: "🚀" },
-        announcement2: { enabled: false, title: "Double Coins Weekend", description: "Earn 2x coins on all surveys and offers this weekend only!", icon: "⚡" },
-        promo: { enabled: true, code: "WELCOME50", description: "Use code WELCOME50 for 50 bonus coins on your first withdrawal!", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() },
-      };
-      const loadAnnouncements = () => {
-        try {
-          const saved = localStorage.getItem("coinloot_homepage_announcements");
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            return {
-              announcement1: { ...defaultAnnouncements.announcement1, ...parsed.announcement1 },
-              announcement2: { ...defaultAnnouncements.announcement2, ...parsed.announcement2 },
-              promo: { ...defaultAnnouncements.promo, ...parsed.promo },
-            };
-          }
-        } catch {}
-        return defaultAnnouncements;
-      };
-      const saveAnnouncements = (data: any) => {
-        localStorage.setItem("coinloot_homepage_announcements", JSON.stringify(data));
-      };
-
-      const [announceData, setAnnounceData] = useState(loadAnnouncements);
-
-      const updateAnnounce = (key: string, field: string, value: any) => {
-        const updated = { ...announceData, [key]: { ...announceData[key], [field]: value } };
-        setAnnounceData(updated);
-        saveAnnouncements(updated);
-      };
-
-      const [localTab, setLocalTab] = useState<"sections" | "announcements">("announcements");
-
       return (
-        <div className="p-4 lg:p-6 space-y-4 max-w-4xl">
-          {/* ── Tab Toggle ── */}
-          <div className="flex items-center gap-2 mb-4">
-            <button onClick={() => setLocalTab("announcements")} className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${localTab === "announcements" ? "bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg" : "bg-slate-800/60 text-slate-400 border border-white/5 hover:border-cyan-400/30"}`}>
-              <Megaphone className="w-3.5 h-3.5 inline mr-1.5" />
-              Announcements & Promo
-            </button>
-            <button onClick={() => setLocalTab("sections")} className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${localTab === "sections" ? "bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg" : "bg-slate-800/60 text-slate-400 border border-white/5 hover:border-cyan-400/30"}`}>
-              <Globe className="w-3.5 h-3.5 inline mr-1.5" />
-              Earn Page Sections
-            </button>
-          </div>
-
-          {/* ── Announcements & Promo Tab ── */}
-          {localTab === "announcements" && (
-            <div className="space-y-4">
-              <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
-                <Megaphone className="w-5 h-5 text-cyan-400" /> Announcements & Promo Management
-              </h1>
-              <p className="text-[10px] text-slate-500 font-mono">Control announcements and promo codes shown on the earn page. Changes apply immediately.</p>
-
-              {/* ═══ Announcement #1 ═══ */}
-              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Megaphone className="w-4 h-4 text-cyan-400" /> Announcement #1</h3>
-                  <button
-                    onClick={() => updateAnnounce("announcement1", "enabled", !announceData.announcement1.enabled)}
-                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.announcement1.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.announcement1.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Title</label>
-                    <input value={announceData.announcement1.title} onChange={(e) => updateAnnounce("announcement1", "title", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Icon (emoji)</label>
-                    <input value={announceData.announcement1.icon} onChange={(e) => updateAnnounce("announcement1", "icon", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
-                  <textarea value={announceData.announcement1.description} onChange={(e) => updateAnnounce("announcement1", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
-                </div>
-              </div>
-
-              {/* ═══ Announcement #2 ═══ */}
-              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Megaphone className="w-4 h-4 text-purple-400" /> Announcement #2</h3>
-                  <button
-                    onClick={() => updateAnnounce("announcement2", "enabled", !announceData.announcement2.enabled)}
-                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.announcement2.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.announcement2.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Title</label>
-                    <input value={announceData.announcement2.title} onChange={(e) => updateAnnounce("announcement2", "title", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Icon (emoji)</label>
-                    <input value={announceData.announcement2.icon} onChange={(e) => updateAnnounce("announcement2", "icon", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
-                  <textarea value={announceData.announcement2.description} onChange={(e) => updateAnnounce("announcement2", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
-                </div>
-              </div>
-
-              {/* ═══ Promo Code ═══ */}
-              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-white flex items-center gap-2"><Gift className="w-4 h-4 text-amber-400" /> Promo Code</h3>
-                  <button
-                    onClick={() => updateAnnounce("promo", "enabled", !announceData.promo.enabled)}
-                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${announceData.promo.enabled ? "bg-emerald-500" : "bg-slate-700"}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${announceData.promo.enabled ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Promo Code</label>
-                    <input value={announceData.promo.code} onChange={(e) => updateAnnounce("promo", "code", e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white uppercase tracking-wider" />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Expiry Date/Time</label>
-                    <input type="datetime-local" value={announceData.promo.expiresAt ? new Date(announceData.promo.expiresAt).toISOString().slice(0, 16) : ""} onChange={(e) => updateAnnounce("promo", "expiresAt", new Date(e.target.value).toISOString())} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
-                  <textarea value={announceData.promo.description} onChange={(e) => updateAnnounce("promo", "description", e.target.value)} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" />
-                </div>
-                <div className="flex items-center gap-3 pt-1">
-                  <span className={`px-3 py-1.5 rounded-lg text-[10px] font-bold font-mono ${new Date(announceData.promo.expiresAt).getTime() > Date.now() ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"}`}>
-                    {new Date(announceData.promo.expiresAt).getTime() > Date.now() ? "Active" : "Expired"}
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">Expires: {new Date(announceData.promo.expiresAt).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Earn Page Sections Tab ── */}
-          {localTab === "sections" && (
-            <>
-              <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
-                <Globe className="w-5 h-5 text-cyan-400" /> Earn Page Sections
-              </h1>
-              <p className="text-[10px] text-slate-500 font-mono">Control which sections are visible on the earn page. Changes apply immediately.</p>
-              <div className="space-y-3">
-                {sectionMeta.map(({ key, label, icon: Icon, desc }) => {
-                  const isVisible = homepageSections[key];
-                  return (
-                    <div key={key} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isVisible ? "bg-emerald-500/10" : "bg-slate-800/60"}`}>
-                          <Icon className={`w-4 h-4 ${isVisible ? "text-emerald-400" : "text-slate-500"}`} />
-                        </div>
-                        <div className="min-w-0">
-                          <span className="block text-sm font-semibold text-white">{label}</span>
-                          <span className="block text-[9px] text-slate-500 font-mono mt-0.5 truncate">{desc}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => toggleSection(key)}
-                        className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${isVisible ? "bg-emerald-500" : "bg-slate-700"}`}
-                      >
-                        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${isVisible ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
-                      </button>
+        <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+          <AdminBackBtn onClick={goBack} />
+          <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+            <Globe className="w-5 h-5 text-cyan-400" /> Earn Page Sections
+          </h1>
+          <p className="text-[10px] text-slate-500 font-mono">Control which sections are visible on the earn page. Changes apply immediately.</p>
+          <div className="space-y-3">
+            {sectionMeta.map(({ key, label, icon: Icon, desc }) => {
+              const isVisible = homepageSections[key];
+              return (
+                <div key={key} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isVisible ? "bg-emerald-500/10" : "bg-slate-800/60"}`}>
+                      <Icon className={`w-4 h-4 ${isVisible ? "text-emerald-400" : "text-slate-500"}`} />
                     </div>
-                  );
-                })}
-              </div>
-              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
-                <h3 className="font-bold text-sm text-white mb-2 flex items-center gap-2"><Eye className="w-4 h-4 text-cyan-400" /> Current Visibility</h3>
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(homepageSections).map(([key, val]) => (
-                    <span key={key} className={`px-3 py-1.5 rounded-xl text-[10px] font-mono font-bold flex items-center gap-1.5 ${val ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800/60 text-slate-500 border border-slate-700/30"}`}>
-                      {val ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      {key.charAt(0).toUpperCase() + key.slice(1)}
-                    </span>
-                  ))}
+                    <div className="min-w-0">
+                      <span className="block text-sm font-semibold text-white">{label}</span>
+                      <span className="block text-[9px] text-slate-500 font-mono mt-0.5 truncate">{desc}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleSection(key)}
+                    className={`relative w-12 h-6 rounded-full transition-all shrink-0 cursor-pointer ${isVisible ? "bg-emerald-500" : "bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${isVisible ? "left-[calc(100%-22px)]" : "left-0.5"}`} />
+                  </button>
                 </div>
-              </div>
-            </>
-          )}
+              );
+            })}
+          </div>
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+            <h3 className="font-bold text-sm text-white mb-2 flex items-center gap-2"><Eye className="w-4 h-4 text-cyan-400" /> Current Visibility</h3>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(homepageSections).map(([key, val]) => (
+                <span key={key} className={`px-3 py-1.5 rounded-xl text-[10px] font-mono font-bold flex items-center gap-1.5 ${val ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800/60 text-slate-500 border border-slate-700/30"}`}>
+                  {val ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       );
     }
@@ -2494,6 +2744,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (section === "settings") {
       return (
         <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+          <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Settings</h1>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
@@ -2536,13 +2787,171 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               </button>
             </div>
           </div>
-          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
-            <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Globe className="w-4 h-4 text-emerald-400" /> Database Info</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 text-[10px] font-mono"><span className="block text-slate-400">Connection</span><span className="text-emerald-400 flex items-center gap-1 mt-1"><Wifi className="w-3 h-3" /> Connected</span></div>
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 text-[10px] font-mono"><span className="block text-slate-400">Users</span><span className="text-white mt-1">{profiles.length}</span></div>
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 text-[10px] font-mono"><span className="block text-slate-400">Withdrawals</span><span className="text-white mt-1">{withdrawals.length}</span></div>
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 text-[10px] font-mono"><span className="block text-slate-400">Storage</span><span className="text-white mt-1">localStorage</span></div>
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2"><Server className="w-4 h-4 text-emerald-400" /> Database Connection</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Project Name</label><input value={dbProjectName} onChange={(e) => setDbProjectName(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="My Supabase Project" /></div>
+              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Project ID</label><input value={dbProjectId} onChange={(e) => setDbProjectId(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="abcdefghijklm" /></div>
+              <div className="sm:col-span-2"><label className="text-[9px] text-slate-500 uppercase block mb-1">Project URL</label><input value={dbProjectUrl} onChange={(e) => setDbProjectUrl(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="https://your-project.supabase.co" /></div>
+              <div className="sm:col-span-2"><label className="text-[9px] text-slate-500 uppercase block mb-1">API Key <span className="text-slate-600">(anon/public)</span></label>
+                <div className="relative">
+                  <input type={dbKeyVisible ? "text" : "password"} value={dbApiKey} onChange={(e) => setDbApiKey(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white pr-8" placeholder="eyJhbGciOiJIUzI1NiIs..." />
+                  <button onClick={() => setDbKeyVisible(!dbKeyVisible)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-all cursor-pointer">
+                    {dbKeyVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={testDbConnection} disabled={dbTesting || !dbProjectUrl || !dbApiKey} className="py-2 px-4 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                {dbTesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wifi className="w-3 h-3" />}
+                {dbTesting ? "Testing..." : "Test Connection"}
+              </button>
+              {dbTestResult && (
+                <span className={`text-[10px] font-mono ${dbTestResult.ok ? "text-emerald-400" : "text-rose-400"}`}>
+                  {dbTestResult.ok ? "✅ " : "❌ "}{dbTestResult.msg}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ── SQL Setup ── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2"><FileText className="w-4 h-4 text-violet-400" /> Database Setup SQL</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Copy and run this SQL in your Supabase SQL Editor to create all required tables.</p>
+            <div className="relative" id="db-setup-sql">
+              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-64 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
+{`-- CoinLoot Database Tables
+-- Run this in your Supabase SQL Editor
+
+-- Users table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT,
+  username TEXT,
+  password TEXT,
+  referral_code TEXT,
+  referred_by TEXT,
+  country TEXT DEFAULT 'BD',
+  avatar TEXT,
+  total_earned_coins BIGINT DEFAULT 0,
+  total_withdrawn_coins BIGINT DEFAULT 0,
+  kyc_status TEXT DEFAULT 'NOT_STARTED',
+  is_banned BOOLEAN DEFAULT FALSE,
+  referrals_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Withdrawals table
+CREATE TABLE IF NOT EXISTS withdrawals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  coins_deducted BIGINT DEFAULT 0,
+  usd_value DECIMAL DEFAULT 0,
+  payout_method TEXT,
+  payout_address TEXT,
+  status TEXT DEFAULT 'PENDING',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Withdrawal methods config
+CREATE TABLE IF NOT EXISTS withdrawal_methods (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  icon TEXT,
+  min_coins BIGINT DEFAULT 0,
+  max_coins BIGINT DEFAULT 0,
+  fee_percent DECIMAL DEFAULT 0,
+  status TEXT DEFAULT 'active'
+);
+
+-- Offerwall providers
+CREATE TABLE IF NOT EXISTS offerwall_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  slug TEXT,
+  category TEXT,
+  color TEXT,
+  connected BOOLEAN DEFAULT TRUE
+);
+
+-- Offers
+CREATE TABLE IF NOT EXISTS offers (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT,
+  name TEXT,
+  payout BIGINT DEFAULT 0,
+  status TEXT DEFAULT 'active',
+  image_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Promo codes
+CREATE TABLE IF NOT EXISTS promo_codes (
+  code TEXT PRIMARY KEY,
+  coins BIGINT DEFAULT 0,
+  max_uses INT DEFAULT 100,
+  used_count INT DEFAULT 0,
+  expires_at TIMESTAMPTZ
+);
+
+-- Promo claims
+CREATE TABLE IF NOT EXISTS promo_claims (
+  user_id TEXT,
+  promo_code TEXT,
+  claimed_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, promo_code)
+);
+
+-- Support tickets
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  subject TEXT,
+  message TEXT,
+  status TEXT DEFAULT 'open',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Admin logs
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id TEXT PRIMARY KEY,
+  action TEXT,
+  category TEXT,
+  target_id TEXT,
+  description TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Admin notifications
+CREATE TABLE IF NOT EXISTS admin_notifications (
+  id TEXT PRIMARY KEY,
+  type TEXT,
+  title TEXT,
+  message TEXT,
+  status TEXT DEFAULT 'unread',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- KYC records
+CREATE TABLE IF NOT EXISTS kyc_records (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  doc_type TEXT,
+  front_image TEXT,
+  back_image TEXT,
+  selfie_image TEXT,
+  status TEXT DEFAULT 'PENDING',
+  submitted_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Site settings
+CREATE TABLE IF NOT EXISTS site_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB
+);`}</pre>
+              <button onClick={() => { navigator.clipboard.writeText(document.querySelector("#db-setup-sql pre")?.textContent || ""); showNotif("success", "SQL copied to clipboard!"); }} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all cursor-pointer" title="Copy SQL">
+                <Copy className="w-3 h-3" />
+              </button>
             </div>
           </div>
           <button onClick={saveSettings} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-xs border border-cyan-500/20 hover:from-cyan-500/30 hover:to-purple-600/30 transition-all">

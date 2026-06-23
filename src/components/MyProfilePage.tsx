@@ -40,8 +40,12 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
       <div className="glass rounded-3xl p-6 sm:p-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-60 h-60 bg-gradient-to-br from-cyan-500/5 to-purple-500/5 blur-[80px] rounded-full pointer-events-none" />
         <div className="relative flex flex-col sm:flex-row items-center sm:items-start gap-6">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-4xl sm:text-5xl shadow-lg shadow-cyan-500/20 shrink-0">
-            {user.username[0].toUpperCase()}
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-4xl sm:text-5xl shadow-lg shadow-cyan-500/20 shrink-0 overflow-hidden">
+            {user.avatar_url ? (
+              <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
+            ) : (
+              <span>{user.username[0].toUpperCase()}</span>
+            )}
           </div>
           <div className="text-center sm:text-left">
             <h2 className="font-sans font-bold text-2xl sm:text-3xl text-white">{user.username}</h2>
@@ -61,7 +65,7 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
           {profileFields.map((field, i) => {
             const Icon = field.icon;
             return (
-              <div key={i} className="bg-slate-900/40 border border-white/5 rounded-2xl p-4 flex items-center gap-3">
+              <div key={i} className="bg-slate-900/70 border border-white/5 rounded-2xl p-4 flex items-center gap-3">
                 <div className={`p-2 rounded-lg bg-white/5 border border-white/5 ${field.color}`}>
                   <Icon className="w-4 h-4" />
                 </div>

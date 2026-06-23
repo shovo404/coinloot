@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "../lib/supabase";
+import { getSupabaseClient } from "../lib/supabase";
 
 interface UseCollectionOptions {
   /** Comma-separated column list for .select() */
@@ -57,7 +57,9 @@ export function useRealtimeCollection<T extends Record<string, any>>(
     setError(null);
 
     try {
-      let query = supabase.from(tableName).select(columns, { count: "exact" });
+      const sb = getSupabaseClient();
+      if (!sb) { setLoading(false); return; }
+      let query = sb.from(tableName).select(columns, { count: "exact" });
 
       if (filterColumn && filterValue !== undefined) {
         query = query.eq(filterColumn, filterValue);

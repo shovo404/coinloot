@@ -88,12 +88,16 @@ function SinglePopup({ popup, onDismiss }: { popup: RewardPopupData; onDismiss: 
 // ─── Main component ─────────────────────────────────────────────────────────
 
 export default function RewardPopup({ popups, onDismiss }: RewardPopupProps) {
+  const handleDismiss = useCallback(() => {
+    if (popups[0]) onDismiss(popups[0].id);
+  }, [popups, onDismiss]);
+
   if (popups.length === 0) return null;
 
   return (
     <div className="fixed bottom-20 sm:bottom-6 left-2 sm:left-6 z-[9999] max-w-sm w-full pointer-events-none">
       <div className="pointer-events-auto">
-        <SinglePopup popup={popups[0]} onDismiss={() => onDismiss(popups[0].id)} />
+        <SinglePopup popup={popups[0]} onDismiss={handleDismiss} />
       </div>
     </div>
   );

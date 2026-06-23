@@ -26,11 +26,11 @@ interface SurveyHubProps {
 }
 
 const SURVEY_LOGO_MAP: Record<string, string> = {
-  "CPX Research": "https://logo.clearbit.com/cpxresearch.com",
-  "Prime Surveys": "https://logo.clearbit.com/primesurveys.com",
-  "BitLabs": "https://logo.clearbit.com/bitlabs.ai",
-  "TheoremReach": "https://logo.clearbit.com/theoremreach.com",
-  "Cherries": "https://logo.clearbit.com/cherries.com",
+  "CPX Research": "/logos/cpxresearch.png",
+  "Prime Surveys": "/logos/primesurveys.png",
+  "BitLabs": "/logos/bitlabs.png",
+  "TheoremReach": "/logos/theoremreach.png",
+  "Cherries": "/logos/cherries.png",
 };
 
 export default function SurveyHub({ user, setUser, onRewardEarned, simulationCountry }: SurveyHubProps) {

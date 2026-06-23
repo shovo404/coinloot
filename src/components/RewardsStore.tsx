@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
+import { playCoinSound } from "../utils/coinSound";
 
 interface RewardsStoreProps {
   user: UserProfile;
@@ -75,6 +76,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     updated[dayIndex].claimed = true;
     setDailyStreakProgress(updated);
 
+    playCoinSound();
     onRewardEarned(pay, `Daily Streak`, `Day ${day.day} streak reward claimed! +${pay.toLocaleString()} coins.`);
     alert(`Success! Multiplier Day ${day.day} verified. +${pay} coins accrued!`);
   };
@@ -131,6 +133,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       // Update usage count
       match.currentUses += 1;
       localStorage.setItem("coinloot_promo_codes", JSON.stringify(adminCodes));
+      playCoinSound();
       onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
       setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
       setPromoCodeInput("");
@@ -150,11 +153,51 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       });
       claimed.push(code);
       localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
+      playCoinSound();
       onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
       setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
       setPromoCodeInput("");
     } else {
-      setPromoError("Invalid code. Enter a valid promo code.");
+      // Check global notification promo code
+      const globalCode = localStorage.getItem("coinloot_global_notif_promo_code") || "";
+      const globalEnabled = JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false");
+      const globalCoins = parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0");
+      if (globalEnabled && globalCode && code === globalCode.toUpperCase() && globalCoins > 0) {
+        const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
+        if (claimed.includes(code)) {
+          setPromoError("You have already redeemed this promo code.");
+          return;
+        }
+        // Check expiry
+        const startRaw = localStorage.getItem("coinloot_global_notif_promo_start");
+        const durRaw = localStorage.getItem("coinloot_global_notif_promo_duration");
+        if (startRaw && durRaw) {
+          try {
+            const dur = JSON.parse(durRaw);
+            const ms = (dur.days || 0) * 86400000 + (dur.hours || 0) * 3600000 + (dur.mins || 0) * 60000 + (dur.secs || 0) * 1000;
+            if (Date.now() >= parseInt(startRaw) + ms) {
+              setPromoError("This promo code has expired.");
+              return;
+            }
+          } catch {}
+        }
+        const payout = globalCoins;
+        const newCoins = user.balance_coins + payout;
+        setUser({
+          ...user,
+          balance_coins: newCoins,
+          balance_usd: newCoins / 1000,
+          total_earned_coins: user.total_earned_coins + payout,
+        });
+        claimed.push(code);
+        localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
+        playCoinSound();
+        onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
+        setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
+        setPromoCodeInput("");
+      } else {
+        setPromoError("Invalid code. Enter a valid promo code.");
+      }
     }
   };
 
@@ -181,6 +224,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       total_earned_coins: user.total_earned_coins + payout
     });
 
+    playCoinSound();
     onRewardEarned(payout, "Weekly Elite Chest", "Weekly elite chest opened! +1,000 coins credited.");
     alert("Chest unlocked! Gained +1,000 Coins and premium orbital badges!");
   };
@@ -204,6 +248,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       });
 
       setSocialRewards(prev => prev.map(r => r.id === rewardId ? { ...r, completed: true } : r));
+      playCoinSound();
       onRewardEarned(payout, `Social Bounty`, `Social bounty "${name}" completed! +${payout.toLocaleString()} coins.`);
       alert(`Bounty verified! You've claimed +${payout} coins for connecting to our community.`);
     }, 1200);

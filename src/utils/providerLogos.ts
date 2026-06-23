@@ -12,22 +12,34 @@ export interface ProviderInfo {
   connected: boolean;
 }
 
+const LOCAL = (slug: string) => `/logos/${slug}.png`;
+
 const DEFAULT_PROVIDERS: ProviderInfo[] = [
-  // ── SURVEYS ──
-  { id: "prov-surveys-1", name: "CPX Research", slug: "cpx-research", initials: "CP", color: "from-purple-500 to-pink-600", border: "border-purple-500/30", bgLight: "bg-purple-500/10", logoUrl: "https://logo.clearbit.com/cpxresearch.com", domain: "cpxresearch.com", category: "surveys", connected: true },
-  { id: "prov-surveys-2", name: "BitLabs", slug: "bitlabs", initials: "BL", color: "from-indigo-500 to-violet-600", border: "border-indigo-500/30", bgLight: "bg-indigo-500/10", logoUrl: "https://logo.clearbit.com/bitlabs.ai", domain: "bitlabs.ai", category: "surveys", connected: true },
-  // ── MAIN OFFERWALLS ──
+  { id: "prov-surveys-1", name: "CPX Research", slug: "cpxresearch", initials: "CP", color: "from-purple-500 to-pink-600", border: "border-purple-500/30", bgLight: "bg-purple-500/10", logoUrl: LOCAL("cpxresearch"), domain: "cpxresearch.com", category: "surveys", connected: true },
+  { id: "prov-surveys-2", name: "BitLabs", slug: "bitlabs", initials: "BL", color: "from-indigo-500 to-violet-600", border: "border-indigo-500/30", bgLight: "bg-indigo-500/10", logoUrl: LOCAL("bitlabs"), domain: "bitlabs.ai", category: "surveys", connected: true },
   { id: "prov-main-1", name: "TOROX", slug: "torox", initials: "TX", color: "from-cyan-500 to-blue-600", border: "border-cyan-500/30", bgLight: "bg-cyan-500/10", logoUrl: "https://logo.clearbit.com/torox.com", domain: "torox.com", category: "main", connected: true },
-  { id: "prov-main-2", name: "AdGate Media", slug: "adgate-media", initials: "AG", color: "from-amber-500 to-orange-600", border: "border-amber-500/30", bgLight: "bg-amber-500/10", logoUrl: "https://logo.clearbit.com/adgatemedia.com", domain: "adgatemedia.com", category: "main", connected: true },
-  { id: "prov-main-3", name: "AdGem", slug: "adgem", initials: "AG", color: "from-rose-500 to-red-600", border: "border-rose-500/30", bgLight: "bg-rose-500/10", logoUrl: "https://logo.clearbit.com/adgem.com", domain: "adgem.com", category: "main", connected: true },
-  { id: "prov-main-4", name: "Lootably", slug: "lootably", initials: "LB", color: "from-emerald-500 to-teal-600", border: "border-emerald-500/30", bgLight: "bg-emerald-500/10", logoUrl: "https://logo.clearbit.com/lootably.com", domain: "lootably.com", category: "main", connected: true },
-  { id: "prov-main-5", name: "TimeWall", slug: "timewall", initials: "TW", color: "from-fuchsia-500 to-pink-600", border: "border-fuchsia-500/30", bgLight: "bg-fuchsia-500/10", logoUrl: "https://logo.clearbit.com/timewall.io", domain: "timewall.io", category: "main", connected: true },
-  { id: "prov-main-6", name: "Revenue Universe", slug: "revenue-universe", initials: "RU", color: "from-sky-500 to-cyan-600", border: "border-sky-500/30", bgLight: "bg-sky-500/10", logoUrl: "https://logo.clearbit.com/revenueuniverse.com", domain: "revenueuniverse.com", category: "main", connected: true },
-  // ── MOBILE / APP INSTALL ──
-  { id: "prov-mobile-1", name: "Ayet Studios", slug: "ayet-studios", initials: "AY", color: "from-teal-500 to-emerald-600", border: "border-teal-500/30", bgLight: "bg-teal-500/10", logoUrl: "https://logo.clearbit.com/ayetstudios.com", domain: "ayetstudios.com", category: "mobile", connected: false },
-  { id: "prov-mobile-2", name: "Kiwi Wall", slug: "kiwi-wall", initials: "KW", color: "from-lime-500 to-green-600", border: "border-lime-500/30", bgLight: "bg-lime-500/10", logoUrl: "https://logo.clearbit.com/kiwiwall.com", domain: "kiwiwall.com", category: "mobile", connected: false },
-  // ── EXTRA ──
-  { id: "prov-extra-1", name: "Monlix", slug: "monlix", initials: "MX", color: "from-orange-500 to-amber-600", border: "border-orange-500/30", bgLight: "bg-orange-500/10", logoUrl: "https://logo.clearbit.com/monlix.com", domain: "monlix.com", category: "extra", connected: false },
+  { id: "prov-main-2", name: "AdGate Media", slug: "adgatemedia", initials: "AG", color: "from-amber-500 to-orange-600", border: "border-amber-500/30", bgLight: "bg-amber-500/10", logoUrl: LOCAL("adgatemedia"), domain: "adgatemedia.com", category: "main", connected: true },
+  { id: "prov-main-3", name: "AdGem", slug: "adgem", initials: "AG", color: "from-rose-500 to-red-600", border: "border-rose-500/30", bgLight: "bg-rose-500/10", logoUrl: LOCAL("adgem"), domain: "adgem.com", category: "main", connected: true },
+  { id: "prov-main-4", name: "Lootably", slug: "lootably", initials: "LB", color: "from-emerald-500 to-teal-600", border: "border-emerald-500/30", bgLight: "bg-emerald-500/10", logoUrl: LOCAL("lootably"), domain: "lootably.com", category: "main", connected: true },
+  { id: "prov-main-5", name: "TimeWall", slug: "timewall", initials: "TW", color: "from-fuchsia-500 to-pink-600", border: "border-fuchsia-500/30", bgLight: "bg-fuchsia-500/10", logoUrl: LOCAL("timewall"), domain: "timewall.io", category: "main", connected: true },
+  { id: "prov-main-6", name: "Revenue Universe", slug: "revenueuniverse", initials: "RU", color: "from-sky-500 to-cyan-600", border: "border-sky-500/30", bgLight: "bg-sky-500/10", logoUrl: LOCAL("revenueuniverse"), domain: "revenueuniverse.com", category: "main", connected: true },
+  { id: "prov-main-7", name: "GemiAd", slug: "gemiad", initials: "GA", color: "from-teal-500 to-cyan-600", border: "border-teal-500/30", bgLight: "bg-teal-500/10", logoUrl: LOCAL("gemiad"), domain: "gemiad.com", category: "main", connected: true },
+  { id: "prov-main-8", name: "Offery", slug: "offery", initials: "OF", color: "from-violet-500 to-purple-600", border: "border-violet-500/30", bgLight: "bg-violet-500/10", logoUrl: "https://logo.clearbit.com/offery.io", domain: "offery.io", category: "main", connected: true },
+  { id: "prov-main-9", name: "MyChips", slug: "mychips", initials: "MC", color: "from-yellow-500 to-amber-600", border: "border-yellow-500/30", bgLight: "bg-yellow-500/10", logoUrl: "https://logo.clearbit.com/mychips.com", domain: "mychips.com", category: "main", connected: true },
+  { id: "prov-main-10", name: "Notik", slug: "notik", initials: "NT", color: "from-rose-500 to-pink-600", border: "border-rose-500/30", bgLight: "bg-rose-500/10", logoUrl: "https://logo.clearbit.com/notik.com", domain: "notik.com", category: "main", connected: true },
+  { id: "prov-main-11", name: "Upwall", slug: "upwall", initials: "UP", color: "from-blue-500 to-indigo-600", border: "border-blue-500/30", bgLight: "bg-blue-500/10", logoUrl: "https://logo.clearbit.com/upwall.com", domain: "upwall.com", category: "main", connected: true },
+  { id: "prov-main-12", name: "AdswedMedia", slug: "adswedmedia", initials: "AM", color: "from-green-500 to-emerald-600", border: "border-green-500/30", bgLight: "bg-green-500/10", logoUrl: LOCAL("adswedmedia"), domain: "adswedmedia.com", category: "main", connected: true },
+  { id: "prov-main-13", name: "AdBreak Media", slug: "adbreakmedia", initials: "AB", color: "from-red-500 to-rose-600", border: "border-red-500/30", bgLight: "bg-red-500/10", logoUrl: "https://logo.clearbit.com/adbreakmedia.com", domain: "adbreakmedia.com", category: "main", connected: true },
+  { id: "prov-main-14", name: "MobiVortex", slug: "mobivortex", initials: "MV", color: "from-cyan-500 to-sky-600", border: "border-cyan-500/30", bgLight: "bg-cyan-500/10", logoUrl: "https://logo.clearbit.com/mobivortex.com", domain: "mobivortex.com", category: "main", connected: true },
+  { id: "prov-main-15", name: "PixyLabs", slug: "pixylabs", initials: "PL", color: "from-fuchsia-500 to-purple-600", border: "border-fuchsia-500/30", bgLight: "bg-fuchsia-500/10", logoUrl: LOCAL("pixylabs"), domain: "pixylabs.com", category: "main", connected: true },
+  { id: "prov-main-16", name: "Klink Labs", slug: "klinklabs", initials: "KL", color: "from-lime-500 to-green-600", border: "border-lime-500/30", bgLight: "bg-lime-500/10", logoUrl: "https://logo.clearbit.com/klinklabs.com", domain: "klinklabs.com", category: "main", connected: true },
+  { id: "prov-main-17", name: "PubScale", slug: "pubscale", initials: "PS", color: "from-orange-500 to-amber-600", border: "border-orange-500/30", bgLight: "bg-orange-500/10", logoUrl: LOCAL("pubscale"), domain: "pubscale.com", category: "main", connected: true },
+  { id: "prov-main-18", name: "Reward Wall", slug: "rewardwall", initials: "RW", color: "from-pink-500 to-rose-600", border: "border-pink-500/30", bgLight: "bg-pink-500/10", logoUrl: "https://logo.clearbit.com/rewardwall.com", domain: "rewardwall.com", category: "main", connected: true },
+  { id: "prov-main-19", name: "Tplayad", slug: "tplayad", initials: "TP", color: "from-indigo-500 to-blue-600", border: "border-indigo-500/30", bgLight: "bg-indigo-500/10", logoUrl: LOCAL("tplayad"), domain: "tplayad.com", category: "main", connected: true },
+  { id: "prov-main-20", name: "RadientWall", slug: "radientwall", initials: "RW", color: "from-amber-500 to-yellow-600", border: "border-amber-500/30", bgLight: "bg-amber-500/10", logoUrl: LOCAL("radientwall"), domain: "radientwall.com", category: "main", connected: true },
+  { id: "prov-mobile-1", name: "Ayet Studios", slug: "ayetstudios", initials: "AY", color: "from-teal-500 to-emerald-600", border: "border-teal-500/30", bgLight: "bg-teal-500/10", logoUrl: LOCAL("ayetstudios"), domain: "ayetstudios.com", category: "mobile", connected: false },
+  { id: "prov-mobile-2", name: "Kiwi Wall", slug: "kiwiwall", initials: "KW", color: "from-lime-500 to-green-600", border: "border-lime-500/30", bgLight: "bg-lime-500/10", logoUrl: LOCAL("kiwiwall"), domain: "kiwiwall.com", category: "mobile", connected: false },
+  { id: "prov-extra-1", name: "Monlix", slug: "monlix", initials: "MX", color: "from-orange-500 to-amber-600", border: "border-orange-500/30", bgLight: "bg-orange-500/10", logoUrl: LOCAL("monlix"), domain: "monlix.com", category: "extra", connected: false },
   { id: "prov-extra-2", name: "Wannads", slug: "wannads", initials: "WN", color: "from-pink-500 to-rose-600", border: "border-pink-500/30", bgLight: "bg-pink-500/10", logoUrl: "https://logo.clearbit.com/wannads.com", domain: "wannads.com", category: "extra", connected: false },
 ];
 
@@ -75,16 +87,13 @@ export function getAllProviders(): ProviderInfo[] {
 export function getProviderInfo(sourceName: string): ProviderInfo {
   const all = getAllProviders();
 
-  // Exact match
   const exact = all.find((p) => p.name === sourceName);
   if (exact) return exact;
 
-  // Partial match
   const lower = sourceName.toLowerCase();
   const partial = all.find((p) => lower.includes(p.name.toLowerCase()) || lower.includes(p.slug.toLowerCase()));
   if (partial) return partial;
 
-  // First word match
   const firstWord = sourceName.split(/\s+/)[0].toLowerCase();
   const byWord = all.find((p) => p.name.toLowerCase().startsWith(firstWord) || p.slug.toLowerCase().startsWith(firstWord));
   if (byWord) return byWord;
@@ -104,14 +113,8 @@ export function getProviderDomain(providerName: string): string {
   return info.domain || "";
 }
 
-// ─── Logo Preload & Cache System ────────────────────────────────────────────
-
 const preloadedLogos = new Set<string>();
 
-/**
- * Preload a single logo URL using the browser's Image API.
- * Already-preloaded URLs are skipped to avoid duplicate requests.
- */
 export function preloadLogo(url: string): void {
   if (!url || preloadedLogos.has(url)) return;
   preloadedLogos.add(url);
@@ -120,10 +123,6 @@ export function preloadLogo(url: string): void {
   img.src = url;
 }
 
-/**
- * Preload all provider logos in the background.
- * Call once on app startup to warm the browser cache.
- */
 export function preloadProviderLogos(): void {
   const providers = getAllProviders();
   providers.forEach((p) => {
@@ -131,9 +130,6 @@ export function preloadProviderLogos(): void {
   });
 }
 
-/**
- * Returns true if a logo URL has been preloaded (or is being preloaded).
- */
 export function isLogoPreloaded(url: string): boolean {
   return preloadedLogos.has(url);
 }

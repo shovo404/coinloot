@@ -19,6 +19,7 @@ export interface UserProfile {
   country?: string;
   is_banned?: boolean;
   restricted_until?: string | null;
+  avatar_url?: string;
   preference_theme?: string;
   preference_language?: string;
 }

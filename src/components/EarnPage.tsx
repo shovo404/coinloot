@@ -3,15 +3,19 @@ import {
   TrendingUp, DollarSign, Sparkles, ShieldCheck, Zap, Coins,
   Star, Lock, ArrowUpRight, Info,
   ChevronRight, Play, BarChart3, Flame,
-  Crown, ClipboardCheck, Megaphone, Gift, Clock,
+  Crown, Megaphone, Gift, Clock,
 } from "lucide-react";
 import { UserProfile, Offer } from "../types";
 import { isUserRestricted } from "../utils/vpnDetector";
 import { getProviderInfo, getProviderLogoUrl, getAllProviders } from "../utils/providerLogos";
+import OfferwallCard from "./OfferwallCard";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getConnectedProviders, fetchOffersFromProvider } from "../utils/fetchOfferwallOffers";
+import { playCoinSound } from "../utils/coinSound";
 import HorizontalScroll from "./HorizontalScroll";
 import SurveyHub from "./SurveyHub";
+import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
+import LockedOfferwallCard from "./LockedOfferwallCard";
 
 interface EarnPageProps {
   user: UserProfile;
@@ -45,21 +49,21 @@ const OFFERWALL_PROVIDERS = [
 ];
 
 const FALLBACK_FEATURED: Offer[] = [
-  { id: "ft-1", title: "TOROX Stellar Offerwall", description: "Browse high-paying offers from premium brands across the globe.", payout_coins: 5000, category: "trending", provider: "TOROX", imageUrl: "https://logo.clearbit.com/torox.com", difficulty: "Medium", link: "https://torox.com" },
-  { id: "ft-2", title: "Revenue Universe Crypto Offer", description: "Register and verify accounts on leading crypto platforms.", payout_coins: 7200, category: "high-paying", provider: "Revenue Universe", imageUrl: "https://logo.clearbit.com/revenueuniverse.com", difficulty: "Hard", link: "https://revenueuniverse.com" },
-  { id: "ft-3", title: "AdGate Galactic Rewards", description: "Try new apps, games, and services. Get rewarded for every action.", payout_coins: 3500, category: "trending", provider: "AdGate Media", imageUrl: "https://logo.clearbit.com/adgatemedia.com", difficulty: "Medium", link: "https://adgatemedia.com" },
-  { id: "ft-4", title: "AdGem Cosmic Install", description: "Install and try new mobile apps. Earn coins per install and session.", payout_coins: 2500, category: "new", provider: "AdGem", imageUrl: "https://logo.clearbit.com/adgem.com", difficulty: "Easy", link: "https://adgem.com" },
-  { id: "ft-5", title: "CPX Quantum Survey Matrix", description: "Answer advanced market research surveys on emerging technologies.", payout_coins: 1800, category: "trending", provider: "CPX Research", imageUrl: "https://logo.clearbit.com/cpxresearch.com", difficulty: "Medium", link: "https://cpxresearch.com" },
-  { id: "ft-6", title: "BitLabs Protocol Survey", description: "Complete tech-oriented surveys and earn premium rewards.", payout_coins: 1200, category: "trending", provider: "BitLabs", imageUrl: "https://logo.clearbit.com/bitlabs.ai", difficulty: "Easy", link: "https://bitlabs.ai" },
+  { id: "ft-1", title: "TOROX Stellar Offerwall", description: "Browse high-paying offers from premium brands across the globe.", payout_coins: 5000, category: "trending", provider: "TOROX", imageUrl: "/logos/torox.png", difficulty: "Medium", link: "https://torox.com" },
+  { id: "ft-2", title: "Revenue Universe Crypto Offer", description: "Register and verify accounts on leading crypto platforms.", payout_coins: 7200, category: "high-paying", provider: "Revenue Universe", imageUrl: "/logos/revenueuniverse.png", difficulty: "Hard", link: "https://revenueuniverse.com" },
+  { id: "ft-3", title: "AdGate Galactic Rewards", description: "Try new apps, games, and services. Get rewarded for every action.", payout_coins: 3500, category: "trending", provider: "AdGate Media", imageUrl: "/logos/adgatemedia.png", difficulty: "Medium", link: "https://adgatemedia.com" },
+  { id: "ft-4", title: "AdGem Cosmic Install", description: "Install and try new mobile apps. Earn coins per install and session.", payout_coins: 2500, category: "new", provider: "AdGem", imageUrl: "/logos/adgem.png", difficulty: "Easy", link: "https://adgem.com" },
+  { id: "ft-5", title: "CPX Quantum Survey Matrix", description: "Answer advanced market research surveys on emerging technologies.", payout_coins: 1800, category: "trending", provider: "CPX Research", imageUrl: "/logos/cpxresearch.png", difficulty: "Medium", link: "https://cpxresearch.com" },
+  { id: "ft-6", title: "BitLabs Protocol Survey", description: "Complete tech-oriented surveys and earn premium rewards.", payout_coins: 1200, category: "trending", provider: "BitLabs", imageUrl: "/logos/bitlabs.png", difficulty: "Easy", link: "https://bitlabs.ai" },
 ];
 
 const FALLBACK_HOT: Offer[] = [
-  { id: "hot-1", title: "Lootably Nebula Tasks", description: "Complete micro-tasks and quick offers for instant coin rewards.", payout_coins: 800, category: "recommended", provider: "Lootably", imageUrl: "https://logo.clearbit.com/lootably.com", difficulty: "Easy", link: "https://lootably.com" },
-  { id: "hot-2", title: "TimeWall Daily Videos", description: "Watch short videos and complete daily check-ins for coins.", payout_coins: 350, category: "new", provider: "TimeWall", imageUrl: "https://logo.clearbit.com/timewall.io", difficulty: "Easy", link: "https://timewall.io" },
-  { id: "hot-3", title: "Ayet Studios App Install", description: "Download and play featured mobile games. Reach level milestones.", payout_coins: 1500, category: "recommended", provider: "Ayet Studios", imageUrl: "https://logo.clearbit.com/ayetstudios.com", difficulty: "Medium", link: "https://ayetstudios.com" },
-  { id: "hot-4", title: "Kiwi Wall Offer Grid", description: "Browse the kiwi wall and complete simple offers for coins.", payout_coins: 1000, category: "recommended", provider: "Kiwi Wall", imageUrl: "https://logo.clearbit.com/kiwiwall.com", difficulty: "Easy", link: "https://kiwiwall.com" },
-  { id: "hot-5", title: "Monlix Survey Panel", description: "Join Monlix's survey panel and earn coins for your opinions.", payout_coins: 2000, category: "recommended", provider: "Monlix", imageUrl: "https://logo.clearbit.com/monlix.com", difficulty: "Medium", link: "https://monlix.com" },
-  { id: "hot-6", title: "Wannads Offer Exchange", description: "Complete Wannads offers from global advertisers. Instant credit.", payout_coins: 1600, category: "trending", provider: "Wannads", imageUrl: "https://logo.clearbit.com/wannads.com", difficulty: "Easy", link: "https://wannads.com" },
+  { id: "hot-1", title: "Lootably Nebula Tasks", description: "Complete micro-tasks and quick offers for instant coin rewards.", payout_coins: 800, category: "recommended", provider: "Lootably", imageUrl: "/logos/lootably.png", difficulty: "Easy", link: "https://lootably.com" },
+  { id: "hot-2", title: "TimeWall Daily Videos", description: "Watch short videos and complete daily check-ins for coins.", payout_coins: 350, category: "new", provider: "TimeWall", imageUrl: "/logos/timewall.png", difficulty: "Easy", link: "https://timewall.io" },
+  { id: "hot-3", title: "Ayet Studios App Install", description: "Download and play featured mobile games. Reach level milestones.", payout_coins: 1500, category: "recommended", provider: "Ayet Studios", imageUrl: "/logos/ayetstudios.png", difficulty: "Medium", link: "https://ayetstudios.com" },
+  { id: "hot-4", title: "Kiwi Wall Offer Grid", description: "Browse the kiwi wall and complete simple offers for coins.", payout_coins: 1000, category: "recommended", provider: "Kiwi Wall", imageUrl: "/logos/kiwiwall.png", difficulty: "Easy", link: "https://kiwiwall.com" },
+  { id: "hot-5", title: "Monlix Survey Panel", description: "Join Monlix's survey panel and earn coins for your opinions.", payout_coins: 2000, category: "recommended", provider: "Monlix", imageUrl: "/logos/monlix.png", difficulty: "Medium", link: "https://monlix.com" },
+  { id: "hot-6", title: "Wannads Offer Exchange", description: "Complete Wannads offers from global advertisers. Instant credit.", payout_coins: 1600, category: "trending", provider: "Wannads", imageUrl: "/logos/wannads.png", difficulty: "Easy", link: "https://wannads.com" },
 ];
 
 function loadAdminOffers(): AdminOffer[] {
@@ -112,6 +116,17 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   const [adminOffers, setAdminOffers] = useState<AdminOffer[]>(() => loadAdminOffers());
   useEffect(() => { setAdminOffers(loadAdminOffers()); }, [user.balance_coins]);
+
+  const [lockedUnlockTick, setLockedUnlockTick] = useState(0);
+  const lockedConfigs = useMemo(() => {
+    return getLockedOfferwallConfigs().filter(
+      (c) => c.isLocked && !isOfferwallUnlocked(user.id, c.providerName)
+    );
+  }, [user.id, user.total_earned_coins, lockedUnlockTick]);
+
+  const handleLockedUnlocked = (providerName: string) => {
+    setLockedUnlockTick((t) => t + 1);
+  };
 
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>(() => {
     try {
@@ -210,6 +225,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
       const progressXp = offer.difficulty === "Easy" ? 50 : offer.difficulty === "Medium" ? 150 : 350;
       const newXp = user.xp + progressXp;
       setUser({ ...user, xp: newXp, level: Math.floor(newXp / 1000) + 1 });
+      playCoinSound();
       onRewardEarned(pay, offer.provider, `Completed ${offer.title} from ${offer.provider}.`);
       setSubmitting(false);
       setViewingOffer(null);
@@ -280,8 +296,8 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   return (
     <section className="px-4 lg:px-8 py-6 max-w-7xl mx-auto space-y-8">
-      {/* ═══════════════════ HOME BANNERS ═══════════════════ */}
-      <HomeBanners user={user} />
+      {/* ═══════════════════ NOTIFICATIONS ═══════════════════ */}
+      <NotificationCards user={user} setUser={setUser} onRewardEarned={onRewardEarned} />
 
       {/* ═══════════════════ FEATURED OFFERS ═══════════════════ */}
       {visibleSections.featured && (
@@ -473,94 +489,53 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
           </h2>
           <span className="text-[10px] font-mono text-slate-500">{OFFERWALL_PROVIDERS.length} providers</span>
         </div>
-        <HorizontalScroll>
+        <HorizontalScroll snap>
           {OFFERWALL_PROVIDERS.map((name) => {
-            const provider = getProviderInfo(name);
-            const logo = getProviderLogoUrl(name);
             const offerCount = getProviderOfferCount(name);
-            const avgPayout = getProviderAvgPayout(name);
             const locked = isProviderLocked(name);
             const lockReason = getLockReason(name);
+            const provider = getProviderInfo(name);
 
             return (
-              <div
-                key={name}
-                className="snap-start shrink-0 w-[200px] sm:w-[220px] lg:w-[240px] group"
-              >
-                <div className={`relative rounded-2xl border transition-all duration-300 p-5 h-full flex flex-col items-center text-center ${
-                  locked
-                    ? "bg-slate-950/40 border-slate-700/30 opacity-60"
-                    : "bg-slate-950/60 border-white/5 hover:border-cyan-400/30 hover:shadow-[0_0_30px_rgba(6,182,212,0.08)] backdrop-blur-xl"
-                }`}>
-                  {!locked && (
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-500/[0.03] to-purple-600/[0.03] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                  )}
-
-                  {locked && (
-                    <div className="absolute top-3 right-3 z-10 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[8px] font-bold text-amber-400 flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5" /> Locked
-                    </div>
-                  )}
-
-                  <div className="relative z-10 flex flex-col items-center flex-1">
-                    <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center p-2 mb-3 overflow-hidden group-hover:scale-110 transition-transform duration-300">
-                      <img
-                        src={logo}
-                        alt={name}
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-contain"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                          (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                        }}
-                      />
-                      <div className={`w-full h-full rounded-xl bg-gradient-to-br ${provider.color || "from-cyan-500 to-blue-600"} flex items-center justify-center ${logo ? "hidden" : ""}`}>
-                        <span className="text-lg font-bold text-white">{provider.initials}</span>
-                      </div>
-                    </div>
-
-                    <h3 className="text-sm font-bold text-white">{name}</h3>
-
-                    <div className="flex items-center gap-2 mt-2 text-[10px] text-slate-400 font-mono">
-                      <span className="flex items-center gap-1"><BarChart3 className="w-3 h-3 text-cyan-400" /> {offerCount || 3} Offers</span>
-                    </div>
-
-                    <span className={`mt-2 px-2 py-0.5 rounded-full text-[7px] font-mono font-bold ${
-                      provider.category === "Main" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                      provider.category === "Surveys" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" :
-                      provider.category === "Mobile" ? "bg-purple-500/10 text-purple-400 border border-purple-500/20" :
-                      "bg-slate-500/10 text-slate-400 border border-slate-500/20"
-                    }`}>{provider.category || "General"}</span>
-
-                    {locked && lockReason && (
-                      <div className="mt-2 px-2 py-1 rounded-lg bg-amber-500/5 border border-amber-500/10 w-full">
-                        <p className="text-[7px] text-amber-300 font-mono">{lockReason}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative z-10 mt-3 w-full">
-                    {locked || isRestricted ? (
-                      <div className="w-full py-2 rounded-xl bg-slate-800/60 text-slate-500 text-[9px] font-semibold text-center border border-white/5 cursor-not-allowed flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" /> {isRestricted ? "Restricted" : "Locked"}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleLaunchProvider(name)}
-                        className="w-full py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[9px] font-bold tracking-wide hover:scale-[1.02] transition-all shadow-lg shadow-cyan-500/10 flex items-center justify-center gap-1.5 cursor-pointer group/btn"
-                      >
-                        Launch Now
-                        <ArrowUpRight className="w-3 h-3 group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+              <div key={name} className="snap-start shrink-0 w-[220px] sm:w-[240px] group">
+                <OfferwallCard
+                  name={name}
+                  category={provider.category || "main"}
+                  offerCount={offerCount || 3}
+                  locked={locked || isRestricted}
+                  lockReason={locked ? lockReason : isRestricted ? "Account restricted" : undefined}
+                  onLaunch={locked || isRestricted ? undefined : () => handleLaunchProvider(name)}
+                />
               </div>
             );
           })}
         </HorizontalScroll>
       </div>
+      )}
+
+      {/* ═══════════════════ PREMIUM LOCKED OFFERWALL CARDS ═══════════════════ */}
+      {visibleSections.offerwalls && lockedConfigs.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
+              <Lock className="w-5 h-5 text-amber-400" />
+              Premium Locked Offerwalls
+            </h2>
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[8px] font-bold text-amber-400 font-mono flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5" /> Locked
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {lockedConfigs.map((cfg) => (
+              <LockedOfferwallCard
+                key={cfg.providerName}
+                config={cfg}
+                user={user}
+                onUnlocked={handleLockedUnlocked}
+              />
+            ))}
+          </div>
+        </div>
       )}
 
       {/* ═══════════════════ LOCKED OFFERWALLS ═══════════════════ */}
@@ -687,162 +662,141 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   );
 }
 
-// ═══ HOME BANNERS — Admin-Controlled Announcements & Promo ═══
-interface AnnouncementData {
-  enabled: boolean;
-  title: string;
-  description: string;
-  icon: string;
-}
-
-interface PromoData {
-  enabled: boolean;
-  code: string;
-  description: string;
-  expiresAt: string;
-}
-
-interface HomeBannerData {
-  announcement1: AnnouncementData;
-  announcement2: AnnouncementData;
-  promo: PromoData;
-}
-
-const DEFAULT_ANNOUNCEMENTS: HomeBannerData = {
-  announcement1: { enabled: true, title: "Welcome to CoinLoot", description: "Complete offers and earn real rewards. Start your earning journey today!", icon: "🚀" },
-  announcement2: { enabled: false, title: "Double Coins Weekend", description: "Earn 2x coins on all surveys and offers this weekend only!", icon: "⚡" },
-  promo: { enabled: true, code: "WELCOME50", description: "Use code WELCOME50 for 50 bonus coins on your first withdrawal!", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() },
-};
-
-function loadAnnouncements(): HomeBannerData {
-  try {
-    const saved = localStorage.getItem("coinloot_homepage_announcements");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        announcement1: { ...DEFAULT_ANNOUNCEMENTS.announcement1, ...parsed.announcement1 },
-        announcement2: { ...DEFAULT_ANNOUNCEMENTS.announcement2, ...parsed.announcement2 },
-        promo: { ...DEFAULT_ANNOUNCEMENTS.promo, ...parsed.promo },
-      };
-    }
-  } catch {}
-  return DEFAULT_ANNOUNCEMENTS;
-}
-
-function PromoCountdown({ expiresAt }: { expiresAt: string }) {
+// ═══ GLOBAL NOTIFICATION — Admin-Controlled Notification + Optional Promo ═══
+function CountdownTimer({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(Date.now());
   const expired = now >= new Date(expiresAt).getTime();
-  const diff = Math.max(0, new Date(expiresAt).getTime() - now);
+  const totalSec = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000));
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const days = Math.floor(diff / 86400000);
-  const hours = Math.floor((diff % 86400000) / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  const seconds = Math.floor((diff % 60000) / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
 
   return (
-    <div className="flex items-center gap-3">
-      {expired ? (
-        <span className="px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold font-mono">Expired</span>
-      ) : (
-        <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="text-xs font-mono font-bold text-cyan-300 tabular-nums">
-            {days > 0 && <span className="mr-1">{days}d</span>}
-            {String(hours).padStart(2, "0")}:{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
-          </span>
-        </div>
-      )}
-    </div>
+    <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
+      {days > 0 && <span className="mr-1">{days}d</span>}
+      {String(hours).padStart(2, "0")}:{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+    </span>
   );
 }
 
-function HomeBanners({ user }: { user: UserProfile }) {
-  const [data, setData] = useState<HomeBannerData>(loadAnnouncements);
+function NotificationCards({ user, setUser, onRewardEarned }: { user: UserProfile; setUser: (u: UserProfile) => void; onRewardEarned?: (coins: number, sourceName: string, message?: string) => void }) {
+  const [notifText, setNotifText] = useState(() => localStorage.getItem("coinloot_global_notif_text") || "");
+  const [promoEnabled, setPromoEnabled] = useState(() => JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
+  const [promoCode, setPromoCode] = useState(() => localStorage.getItem("coinloot_global_notif_promo_code") || "");
+  const [promoCoins, setPromoCoins] = useState(() => parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
+  const [promoDuration, setPromoDuration] = useState(() => {
+    try { const d = JSON.parse(localStorage.getItem("coinloot_global_notif_promo_duration") || "{}"); return d; } catch { return { days: 0, hours: 0, mins: 30, secs: 0 }; }
+  });
+  const [claimed, setClaimed] = useState(() => {
+    const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
+    const code = localStorage.getItem("coinloot_global_notif_promo_code") || "";
+    return list.includes(code);
+  });
+
+  const refresh = () => {
+    setNotifText(localStorage.getItem("coinloot_global_notif_text") || "");
+    setPromoEnabled(JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
+    setPromoCode(localStorage.getItem("coinloot_global_notif_promo_code") || "");
+    setPromoCoins(parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
+    setPromoHours(parseInt(localStorage.getItem("coinloot_global_notif_promo_hours") || "24"));
+    const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
+    const code = localStorage.getItem("coinloot_global_notif_promo_code") || "";
+    setClaimed(list.includes(code));
+  };
 
   useEffect(() => {
-    const handler = () => setData(loadAnnouncements());
-    window.addEventListener("storage", handler);
-    const poll = setInterval(handler, 2000);
+    window.addEventListener("storage", refresh);
+    const poll = setInterval(refresh, 2000);
     return () => {
-      window.removeEventListener("storage", handler);
+      window.removeEventListener("storage", refresh);
       clearInterval(poll);
     };
   }, []);
 
-  const { announcement1, announcement2, promo } = data;
+  const promoMs = (promoDuration.days || 0) * 86400000 + (promoDuration.hours || 0) * 3600000 + (promoDuration.mins || 0) * 60000 + (promoDuration.secs || 0) * 1000;
+  const promoExpiresAt = promoEnabled && promoCode && promoMs > 0
+    ? (() => {
+        const stored = localStorage.getItem("coinloot_global_notif_promo_start");
+        const start = stored ? parseInt(stored) : Date.now();
+        if (!stored) localStorage.setItem("coinloot_global_notif_promo_start", String(start));
+        return new Date(start + promoMs).toISOString();
+      })()
+    : null;
+
+  const promoExpired = promoExpiresAt ? Date.now() >= new Date(promoExpiresAt).getTime() : false;
   const cards: { key: string; element: React.ReactNode }[] = [];
 
-  if (announcement1.enabled) {
+  // Global notification text
+  if (notifText.trim()) {
     cards.push({
-      key: "ann1",
+      key: "global",
       element: (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-indigo-950/40 border border-white/5 p-5 h-full group hover:border-cyan-400/30 transition-all">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-indigo-950/40 border border-white/5 p-4 sm:p-5 h-full group hover:border-cyan-400/30 transition-all">
           <div className="absolute top-0 right-0 w-40 h-40 bg-cyan-500/5 blur-[80px] rounded-full pointer-events-none" />
           <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-2xl">{announcement1.icon || "📢"}</span>
-              <h3 className="text-sm font-bold text-white">{announcement1.title}</h3>
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <Megaphone className="w-4 h-4 text-cyan-400 shrink-0" />
+              <h3 className="text-sm font-bold text-white">Announcement</h3>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed flex-1">{announcement1.description}</p>
+            <p className="text-[11px] text-slate-400 leading-relaxed flex-1">{notifText}</p>
           </div>
         </div>
       ),
     });
   }
 
-  if (announcement2.enabled) {
-    cards.push({
-      key: "ann2",
-      element: (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-purple-950/40 border border-white/5 p-5 h-full group hover:border-purple-400/30 transition-all">
-          <div className="absolute top-0 right-0 w-40 h-40 bg-purple-500/5 blur-[80px] rounded-full pointer-events-none" />
-          <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-2xl">{announcement2.icon || "📢"}</span>
-              <h3 className="text-sm font-bold text-white">{announcement2.title}</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed flex-1">{announcement2.description}</p>
-          </div>
-        </div>
-      ),
-    });
-  }
-
-  if (promo.enabled) {
-    const expired = Date.now() >= new Date(promo.expiresAt).getTime();
+  // Promo notification
+  if (promoEnabled && promoCode && promoCoins > 0 && !promoExpired) {
     cards.push({
       key: "promo",
       element: (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-amber-950/30 border border-white/5 p-5 h-full group hover:border-amber-400/30 transition-all">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-amber-950/30 border border-white/5 p-4 sm:p-5 h-full group hover:border-amber-400/30 transition-all">
           <div className="absolute top-0 right-0 w-40 h-40 bg-amber-500/5 blur-[80px] rounded-full pointer-events-none" />
           <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center gap-3 mb-3">
-              <Gift className="w-5 h-5 text-amber-400" />
-              <h3 className="text-sm font-bold text-white">Promo Code</h3>
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <Gift className="w-4 h-4 text-amber-400 shrink-0" />
+              <h3 className="text-sm font-bold text-white">Promo Code Available</h3>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed mb-3 flex-1">{promo.description}</p>
-            <div className="flex items-center gap-2 mb-3">
-              <code className="px-3 py-1.5 rounded-lg bg-black/40 border border-amber-500/20 text-amber-300 text-xs font-mono font-bold tracking-wider select-all">
-                {promo.code}
-              </code>
-            </div>
-            <div className="flex items-center justify-between mt-auto">
-              <PromoCountdown expiresAt={promo.expiresAt} />
-              <button
-                disabled={expired}
-                className={`px-4 py-2 rounded-xl text-[10px] font-bold font-mono tracking-wide transition-all cursor-pointer ${
-                  expired
-                    ? "bg-slate-800/60 text-slate-600 border border-slate-700/30 cursor-not-allowed"
-                    : "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/20 hover:shadow-xl hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-95"
-                }`}
-              >
-                {expired ? "Expired" : "Redeem"}
-              </button>
+            <p className="text-[11px] text-slate-400 leading-relaxed mb-3 flex-1">
+              Use code <code className="px-2 py-0.5 rounded bg-black/40 border border-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">{promoCode}</code> to get <span className="text-amber-300 font-bold">{promoCoins.toLocaleString()} coins</span>!
+            </p>
+            <div className="flex items-center justify-between gap-3 mt-auto flex-wrap">
+              <div className="flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                {promoExpiresAt && <CountdownTimer expiresAt={promoExpiresAt} />}
+              </div>
+              {claimed ? (
+                <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold font-mono">Claimed ✓</span>
+              ) : (
+                <button
+                    onClick={() => {
+                      const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
+                      if (list.includes(promoCode)) { setClaimed(true); return; }
+                      list.push(promoCode);
+                      localStorage.setItem("coinloot_claimed_promos", JSON.stringify(list));
+                      const newBalance = user.balance_coins + promoCoins;
+                      setUser({
+                        ...user,
+                        balance_coins: newBalance,
+                        balance_usd: newBalance / 1000,
+                        total_earned_coins: user.total_earned_coins + promoCoins,
+                      });
+                      playCoinSound();
+                      onRewardEarned?.(promoCoins, "Promo Code", `Promo code "${promoCode}" redeemed! +${promoCoins.toLocaleString()} coins credited.`);
+                      setClaimed(true);
+                    }}
+                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-bold font-mono shadow-lg shadow-amber-500/20 hover:shadow-xl hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+                >
+                  Claim {promoCoins.toLocaleString()} Coins
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -852,15 +806,10 @@ function HomeBanners({ user }: { user: UserProfile }) {
 
   if (cards.length === 0) return null;
 
-  const gridCols =
-    cards.length === 1
-      ? "grid-cols-1"
-      : cards.length === 2
-        ? "grid-cols-1 sm:grid-cols-2"
-        : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+  const gridCols = cards.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2";
 
   return (
-    <div className={`grid ${gridCols} gap-4`}>
+    <div className={`grid ${gridCols} gap-3 sm:gap-4`}>
       {cards.map((c) => (
         <div key={c.key}>{c.element}</div>
       ))}

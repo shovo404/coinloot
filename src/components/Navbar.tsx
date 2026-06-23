@@ -231,7 +231,12 @@ export default function Navbar({
                     </div>
                     {user.kyc_status !== "APPROVED" && (
                       <div className="px-4 pb-4">
-                        <button className="w-full py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-semibold text-[10px] hover:bg-cyan-500/20 transition-all">Complete KYC Verification</button>
+                        <button
+                          onClick={() => setActiveTab?.("kyc-upload")}
+                          className="w-full py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-semibold text-[10px] hover:bg-cyan-500/20 transition-all cursor-pointer"
+                        >
+                          Complete KYC Verification
+                        </button>
                       </div>
                     )}
                   </div>
@@ -276,14 +281,18 @@ export default function Navbar({
               <div ref={profileRef} className="relative">
                 <button
                   onClick={() => toggleDropdown("profile")}
-                  className={`p-2 rounded-xl border transition-all flex items-center justify-center min-h-[36px] min-w-[36px] ${
+                  className={`p-0.5 rounded-xl border transition-all flex items-center justify-center min-h-[36px] min-w-[36px] overflow-hidden ${
                     openDropdown === "profile"
                       ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
                       : "bg-slate-900/40 border-white/5 text-slate-400 hover:border-purple-500/30 hover:bg-purple-500/5 hover:text-purple-400"
                   }`}
                   title={user.username}
                 >
-                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt={user.username} className="w-[30px] h-[30px] sm:w-[34px] sm:h-[34px] rounded-lg object-cover" />
+                  ) : (
+                    <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -324,14 +333,18 @@ export default function Navbar({
               <div ref={profileMobileRef} className="relative">
                 <button
                   onClick={() => toggleDropdown("profile")}
-                  className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-h-[44px] min-w-[44px] ${
+                  className={`p-0.5 rounded-xl border transition-all flex items-center justify-center min-h-[44px] min-w-[44px] overflow-hidden ${
                     openDropdown === "profile"
                       ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
                       : "bg-slate-900/40 border-white/5 text-slate-400 hover:border-purple-500/30 hover:bg-purple-500/5 hover:text-purple-400"
                   }`}
                   title={user.username}
                 >
-                  <User className="w-4 h-4" />
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt={user.username} className="w-[36px] h-[36px] rounded-[10px] object-cover" />
+                  ) : (
+                    <User className="w-4 h-4" />
+                  )}
                 </button>
               </div>
 
@@ -357,13 +370,17 @@ export default function Navbar({
                 >
                   {/* Panel Header */}
                   <div className="flex items-center justify-between p-4 border-b border-white/5">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt={user.username} className="w-9 h-9 rounded-xl object-cover" />
+                    ) : (
                       <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-sm">{user.username[0].toUpperCase()}</div>
-                      <div>
-                        <span className="block text-sm font-semibold text-white">{user.username}</span>
-                        <span className="block text-[10px] text-slate-400 font-mono">{user.email}</span>
-                      </div>
+                    )}
+                    <div>
+                      <span className="block text-sm font-semibold text-white">{user.username}</span>
+                      <span className="block text-[10px] text-slate-400 font-mono">{user.email}</span>
                     </div>
+                  </div>
                     <button onClick={() => setMobileMenuOpen(false)} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all" aria-label="Close menu">
                       <X className="w-5 h-5" />
                     </button>
@@ -524,7 +541,11 @@ export default function Navbar({
           <div className="absolute md:absolute right-2 md:right-0 top-full md:top-[70px] left-2 md:left-auto w-auto md:w-56 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-slide-up md:animate-zoom-in z-50 mobile-dropdown-panel">
           <div className="p-4 border-b border-white/5">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-sm">{user.username[0].toUpperCase()}</div>
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt={user.username} className="w-9 h-9 rounded-xl object-cover" />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-sm">{user.username[0].toUpperCase()}</div>
+              )}
               <div className="min-w-0">
                 <span className="block text-sm font-semibold text-white truncate">{user.username}</span>
                 <span className="block text-[10px] text-slate-400 font-mono truncate">{user.email}</span>

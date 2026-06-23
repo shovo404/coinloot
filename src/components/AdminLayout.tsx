@@ -4,20 +4,18 @@ import {
   BarChart3, ShieldAlert, Settings, LogOut, Search, ChevronDown, Lock,
   Coins, Award, Activity, Globe, Server, Menu, X, User as UserIcon,
   PanelRightClose, PanelRight, RefreshCw, ShieldCheck, ChevronLeft,
-  MessageSquare,
+  MessageSquare, UserPlus, ExternalLink, Check,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { AppNotification } from "./Navbar";
 import AdminPanel from "./AdminPanel";
-import { getUnreadAdminCount } from "../utils/adminNotifier";
+import { getUnreadAdminCount, getPendingAdminNotifications, markAdminRead, markAllAdminRead, markAsDone, onAdminNotifChange, AdminNotification } from "../utils/adminNotifier";
 
 interface AdminLayoutProps {
   user: UserProfile;
   onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
   onLogout: () => void;
   notifications: AppNotification[];
-  onMarkNotificationRead: (id: string) => void;
-  onMarkAllRead: () => void;
 }
 
 interface SidebarItem {
@@ -30,24 +28,69 @@ interface SidebarItem {
 
 const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "users", label: "Users", icon: Users, children: [{ id: "users-all", label: "All Users" }] },
-  { id: "offerwalls", label: "Offerwalls", icon: Zap, children: [{ id: "offerwalls-main", label: "Providers & APIs" }] },
+  { id: "users", label: "Users", icon: Users },
+  { id: "offerwalls", label: "Offerwalls", icon: Zap },
   { id: "offers", label: "Offers", icon: Activity },
-  { id: "locked-offers", label: "Locked Offers", icon: Lock, children: [{ id: "locked-offers-rules", label: "Unlock Rules" }] },
+  { id: "locked-offers", label: "Lock Rules", icon: Lock },
+  { id: "locked-offers-management", label: "Offerwall Mgt", icon: ShieldCheck },
+  { id: "locked-offers-promos", label: "Lock Promos", icon: Gift },
   { id: "coins", label: "Coins & Rewards", icon: Coins },
-  { id: "withdrawals", label: "Withdrawals", icon: Wallet, children: [{ id: "withdrawals-all", label: "All Requests" }, { id: "withdraw-methods", label: "Payment Methods" }] },
-  { id: "notifications", label: "Notifications", icon: Bell, children: [{ id: "notifications-send", label: "Send & Broadcast" }] },
+  { id: "withdrawals", label: "Withdrawals", icon: Wallet },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "promos", label: "Promo Codes", icon: Gift },
   { id: "referrals", label: "Referrals", icon: Link2 },
   { id: "tickets", label: "Tickets", icon: MessageSquare },
   { id: "homepage", label: "Homepage", icon: Globe },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "security", label: "Security", icon: ShieldAlert, children: [{ id: "fraud", label: "Fraud Detection" }, { id: "logs", label: "Activity Logs" }, { id: "vpn-control", label: "VPN Control" }] },
+  { id: "kyc", label: "KYC", icon: ShieldCheck },
+  { id: "database", label: "Database", icon: Server },
+  { id: "security", label: "Security", icon: ShieldAlert },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
-function AdminHeader({ user, onLogout, unreadCount, onSectionChange }: { user: UserProfile; onLogout: () => void; unreadCount: number; onSectionChange?: (id: string) => void }) {
+function AdminHeader({ user, onLogout, userNotifs, onSectionChange }: { user: UserProfile; onLogout: () => void; userNotifs: AppNotification[]; onSectionChange?: (id: string) => void }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  const pendingNotifs = getPendingAdminNotifications();
+  const badgeCount = userNotifs.filter((n) => n.unread).length + getUnreadAdminCount();
+
+  useEffect(() => {
+    const unsub = onAdminNotifChange(() => setRefreshKey(k => k + 1));
+    const handleClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotifDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => { unsub(); document.removeEventListener("mousedown", handleClick); };
+  }, []);
+
+  // Force re-render when dropdown opens to get fresh data
+  useEffect(() => { if (showNotifDropdown) setRefreshKey(k => k + 1); }, [showNotifDropdown]);
+
+  const notifIcon = (type: string) => {
+    switch (type) {
+      case "new_user": return <UserPlus className="w-4 h-4 text-emerald-400" />;
+      case "withdrawal_request": return <ExternalLink className="w-4 h-4 text-amber-400" />;
+      default: return <Bell className="w-4 h-4 text-purple-400" />;
+    }
+  };
+
+  const notifBg = (type: string) => {
+    switch (type) {
+      case "new_user": return "bg-emerald-500/10 border-emerald-500/20";
+      case "withdrawal_request": return "bg-amber-500/10 border-amber-500/20";
+      default: return "bg-purple-500/10 border-purple-500/20";
+    }
+  };
+
+  const handleMarkAsDone = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    markAsDone(id);
+  };
 
   return (
     <header className="h-14 lg:h-16 border-b border-white/5 bg-slate-950/80 backdrop-blur-xl flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
@@ -67,28 +110,87 @@ function AdminHeader({ user, onLogout, unreadCount, onSectionChange }: { user: U
           <input placeholder="Quick search..." className="w-36 lg:w-48 bg-slate-900/60 border border-white/5 rounded-xl pl-9 pr-3 py-1.5 lg:py-2 text-[10px] font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20 transition-all" />
         </div>
 
-        <button onClick={() => onSectionChange?.("notifications")} className="p-2 rounded-xl bg-slate-900/40 border border-white/5 text-slate-400 hover:border-cyan-500/30 hover:text-cyan-400 transition-all relative cursor-pointer">
-          <Bell className="w-3.5 h-3.5" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-cyan-500 text-slate-950 font-mono text-[8px] font-bold rounded-full min-w-[14px] h-3.5 flex items-center justify-center px-0.5">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
+        <div ref={notifRef} className="relative">
+          <button onClick={() => { setShowNotifDropdown(!showNotifDropdown); setShowProfileMenu(false); }} className="p-2 rounded-xl bg-slate-900/40 border border-white/5 text-slate-400 hover:border-cyan-500/30 hover:text-cyan-400 transition-all relative cursor-pointer">
+            <Bell className="w-3.5 h-3.5" />
+            {badgeCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-cyan-500 text-slate-950 font-mono text-[8px] font-bold rounded-full min-w-[14px] h-3.5 flex items-center justify-center px-0.5">
+                {badgeCount > 9 ? "9+" : badgeCount}
+              </span>
+            )}
+          </button>
+
+          {showNotifDropdown && (
+            <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-white/5 rounded-2xl shadow-2xl overflow-hidden z-50">
+              <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                <span className="font-bold text-xs text-white">Admin Notifications</span>
+                {pendingNotifs.length > 0 && (
+                  <button onClick={() => { markAllAdminRead(); }} className="text-[9px] text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">Mark all done</button>
+                )}
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {pendingNotifs.length === 0 ? (
+                  <div className="p-8 text-center text-[10px] text-slate-500 font-mono">No admin notifications yet</div>
+                ) : (
+                  pendingNotifs.slice(0, 20).map((n: AdminNotification) => (
+                    <div key={n.id} className={`relative pl-3 pr-2 py-3 border-b border-white/[0.04] last:border-b-0 transition-all duration-200 flex gap-3 group ${
+                      n.status === "pending" && !n.is_read
+                        ? "bg-cyan-500/[0.06] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-gradient-to-b before:from-cyan-400 before:to-purple-500 before:rounded-r"
+                        : "hover:bg-white/[0.04]"
+                    }`}>
+                      <div className={`w-8 h-8 rounded-xl ${notifBg(n.type)} flex items-center justify-center shrink-0`}>
+                        {notifIcon(n.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className={`text-[11px] font-bold block leading-snug ${n.status === "pending" && !n.is_read ? "text-white" : "text-slate-200"}`}>{n.title}</span>
+                          {n.status === "pending" && !n.is_read && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 mt-1 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />}
+                        </div>
+                        <p className={`text-[9px] leading-relaxed mt-0.5 ${n.status === "pending" && !n.is_read ? "text-slate-300" : "text-slate-400"}`}>{n.message}</p>
+                        <span className="text-[7px] text-slate-600 font-mono mt-1 block">{new Date(n.created_at).toLocaleString()}</span>
+                      </div>
+                      <button onClick={(e) => handleMarkAsDone(e, n.id)} className="shrink-0 self-center p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 opacity-0 group-hover:opacity-100 hover:bg-emerald-500/20 transition-all cursor-pointer" title="Mark as Done">
+                        <Check className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="px-3 py-2.5 border-t border-white/5">
+                <button onClick={() => { setShowNotifDropdown(false); onSectionChange?.("notifications"); }} className="w-full text-center text-[9px] text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">View all in notifications panel</button>
+              </div>
+            </div>
           )}
-        </button>
+        </div>
 
         <div className="relative">
-          <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900/40 border border-white/5 hover:border-purple-500/30 transition-all">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-[9px]">
-              {user.username[0].toUpperCase()}
-            </div>
+          <button onClick={() => { setShowProfileMenu(!showProfileMenu); setShowNotifDropdown(false); }} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900/40 border border-white/5 hover:border-purple-500/30 transition-all">
+                    <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-[9px] overflow-hidden">
+                      {user.avatar_url ? (
+                        <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
+                      ) : (
+                        user.username[0].toUpperCase()
+                      )}
+                    </div>
             <span className="hidden lg:block text-[10px] font-semibold text-white">{user.username}</span>
             <ChevronDown className="w-2.5 h-2.5 text-slate-500" />
           </button>
           {showProfileMenu && (
             <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
               <div className="p-3 border-b border-white/5">
-                <span className="block text-xs font-semibold text-white">{user.username}</span>
-                <span className="block text-[9px] text-slate-400 font-mono">{user.email}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold text-[10px] overflow-hidden shrink-0">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
+                    ) : (
+                      user.username[0].toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <span className="block text-xs font-semibold text-white">{user.username}</span>
+                    <span className="block text-[9px] text-slate-400 font-mono">{user.email}</span>
+                  </div>
+                </div>
                 <span className="inline-block mt-1 px-2 py-0.5 text-[8px] font-bold bg-cyan-500/10 text-cyan-400 rounded border border-cyan-500/20">ADMIN</span>
               </div>
               <div className="p-2">
@@ -107,8 +209,6 @@ function AdminHeader({ user, onLogout, unreadCount, onSectionChange }: { user: U
 function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onMobileClose }: {
   activeSection: string; onSectionChange: (id: string) => void; collapsed: boolean; onToggle?: () => void; onMobileClose?: () => void;
 }) {
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(["dashboard", "users", "offerwalls", "withdrawals"]));
-  const toggleExpand = (itemId: string) => setExpandedItems((prev) => { const n = new Set(prev); n.has(itemId) ? n.delete(itemId) : n.add(itemId); return n; });
   const isActive = (id: string) => activeSection === id;
 
   const handleClick = (id: string) => {
@@ -139,19 +239,16 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5 scrollbar-thin">
         {SIDEBAR_ITEMS.map((item) => {
           const Icon = item.icon;
-          const hasChildren = item.children && item.children.length > 0;
-          const expanded = expandedItems.has(item.id);
-          const itemActive = isActive(item.id) || (hasChildren && item.children!.some((c) => isActive(c.id)));
+          const itemActive = isActive(item.id);
 
           if (collapsed) {
             return (
               <div key={item.id} className="relative group">
-                <button onClick={() => { if (hasChildren) handleClick(item.children![0].id); else handleClick(item.id); }}
+                <button onClick={() => handleClick(item.id)}
                   className="w-full flex items-center justify-center p-2.5 rounded-xl transition-all cursor-pointer">
                   <Icon className={`w-4 h-4 ${itemActive ? "text-cyan-400" : "text-slate-500 group-hover:text-slate-300"}`} />
                   {itemActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-cyan-400 rounded-full shadow-[0_0_6px_rgba(6,182,212,0.5)]" />}
                 </button>
-                {/* Tooltip */}
                 <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-[10px] text-white font-semibold whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none z-50 shadow-xl">
                   {item.label}
                 </div>
@@ -160,26 +257,12 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
           }
 
           return (
-            <div key={item.id}>
-              <button onClick={() => { if (hasChildren) { toggleExpand(item.id); handleClick(item.id); } else handleClick(item.id); }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-semibold tracking-wide transition-all group cursor-pointer ${itemActive ? "bg-gradient-to-r from-cyan-500/10 to-purple-600/5 border border-cyan-500/20 text-cyan-300" : "text-slate-400 hover:text-white hover:bg-white/[0.03] border border-transparent"}`}>
-                <Icon className={`w-4 h-4 shrink-0 ${itemActive ? "text-cyan-400" : "text-slate-500 group-hover:text-slate-300"}`} />
-                <span className="flex-1 text-left truncate">{item.label}</span>
-                {item.badge && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">{item.badge}</span>}
-                {hasChildren && <ChevronDown className={`w-3 h-3 shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />}
-              </button>
-              {hasChildren && expanded && (
-                <div className="ml-7 mt-0.5 space-y-0.5 border-l border-white/5 pl-2">
-                  {item.children!.map((child) => (
-                    <button key={child.id} onClick={() => handleClick(child.id)}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${isActive(child.id) ? "text-cyan-400 bg-cyan-500/5 border border-cyan-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.02]"}`}>
-                      <span className={`w-1 h-1 rounded-full shrink-0 ${isActive(child.id) ? "bg-cyan-400" : "bg-slate-600"}`} />
-                      <span className="truncate">{child.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button key={item.id} onClick={() => handleClick(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-semibold tracking-wide transition-all cursor-pointer ${itemActive ? "bg-gradient-to-r from-cyan-500/10 to-purple-600/5 border border-cyan-500/20 text-cyan-300" : "text-slate-400 hover:text-white hover:bg-white/[0.03] border border-transparent"}`}>
+              <Icon className={`w-4 h-4 shrink-0 ${itemActive ? "text-cyan-400" : "text-slate-500"}`} />
+              <span className="flex-1 text-left truncate">{item.label}</span>
+              {item.badge && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">{item.badge}</span>}
+            </button>
           );
         })}
       </nav>
@@ -197,11 +280,10 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
   );
 }
 
-export default function AdminLayout({ user, onRewardEarned, onLogout, notifications, onMarkNotificationRead, onMarkAllRead }: AdminLayoutProps) {
+export default function AdminLayout({ user, onRewardEarned, onLogout, notifications }: AdminLayoutProps) {
   const [activeSection, setActiveSection] = useState("dashboard");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // persist sidebar state in localStorage — default to expanded (false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("coinloot_sidebar_collapsed") === "true";
@@ -213,8 +295,6 @@ export default function AdminLayout({ user, onRewardEarned, onLogout, notificati
       localStorage.setItem("coinloot_sidebar_collapsed", String(sidebarCollapsed));
     } catch { /* */ }
   }, [sidebarCollapsed]);
-
-  const unreadCount = notifications.filter((n) => n.unread).length + getUnreadAdminCount();
 
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden">
@@ -249,7 +329,7 @@ export default function AdminLayout({ user, onRewardEarned, onLogout, notificati
       )}
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <AdminHeader user={user} onLogout={onLogout} unreadCount={unreadCount} onSectionChange={setActiveSection} />
+          <AdminHeader user={user} onLogout={onLogout} userNotifs={notifications} onSectionChange={setActiveSection} />
         <div className="flex-1 overflow-y-auto">
           <AdminPanel user={user} onRewardEarned={onRewardEarned} activeSection={activeSection} onSectionChange={setActiveSection} />
         </div>

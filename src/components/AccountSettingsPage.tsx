@@ -16,7 +16,7 @@ export default function AccountSettingsPage({ user, setUser, simulationCountry, 
   const [fullName, setFullName] = useState(user.username);
   const [username, setUsername] = useState(user.username);
   const [country, setCountry] = useState(simulationCountry);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(user.avatar_url || null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -136,7 +136,7 @@ export default function AccountSettingsPage({ user, setUser, simulationCountry, 
         username: username.trim(),
         email: newEmail || user.email,
         balance_usd: user.balance_coins / 1000,
-        // Include theme and language in the profile update
+        avatar_url: avatarPreview || undefined,
         preference_theme: theme,
         preference_language: language,
       };
@@ -163,6 +163,7 @@ export default function AccountSettingsPage({ user, setUser, simulationCountry, 
               ...a.profile,
               username: username.trim(),
               email: newEmail || a.email,
+              avatar_url: avatarPreview || a.profile?.avatar_url,
               preference_theme: theme,
               preference_language: language,
             },

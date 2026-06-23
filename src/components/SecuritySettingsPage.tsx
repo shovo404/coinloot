@@ -13,7 +13,7 @@ export default function SecuritySettingsPage({ user, setUser }: SecuritySettings
       label: "KYC Verification",
       value: user.kyc_status,
       color: user.kyc_status === "APPROVED" ? "text-emerald-400" : user.kyc_status === "PENDING" ? "text-amber-400" : "text-slate-400",
-      bg: user.kyc_status === "APPROVED" ? "bg-emerald-500/10" : user.kyc_status === "PENDING" ? "bg-amber-500/10" : "bg-slate-900/40",
+      bg: user.kyc_status === "APPROVED" ? "bg-emerald-500/20" : user.kyc_status === "PENDING" ? "bg-amber-500/20" : "bg-slate-900/70",
       border: user.kyc_status === "APPROVED" ? "border-emerald-500/20" : user.kyc_status === "PENDING" ? "border-amber-500/20" : "border-white/5",
     },
     {
@@ -21,7 +21,7 @@ export default function SecuritySettingsPage({ user, setUser }: SecuritySettings
       label: "VPN / Proxy Detection",
       value: user.vpn_detected ? "DETECTED" : "CLEAN",
       color: user.vpn_detected ? "text-rose-400" : "text-emerald-400",
-      bg: user.vpn_detected ? "bg-rose-500/10" : "bg-emerald-500/10",
+      bg: user.vpn_detected ? "bg-rose-500/20" : "bg-emerald-500/20",
       border: user.vpn_detected ? "border-rose-500/20" : "border-emerald-500/20",
     },
   ];

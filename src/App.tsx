@@ -4,7 +4,10 @@ import { LogIn, ShieldCheck, Zap, Users, DollarSign, CheckCircle, Globe, Star, C
 import { AppNotification } from "./components/Navbar";
 import { playCoinSound, playNotificationSound } from "./utils/coinSound";
 import RewardPopup, { usePopupQueue } from "./components/RewardPopup";
+import LevelUpCelebration from "./components/LevelUpCelebration";
+import KycUploadPage from "./components/KycUploadPage";
 import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult } from "./utils/vpnDetector";
+import { calcLevel } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 
 import AnimatedBackground from "./components/AnimatedBackground";
@@ -141,6 +144,7 @@ export default function App() {
     '/profile': 'my-profile',
     '/settings': 'account-settings',
     '/security': 'security-settings',
+    '/kyc': 'kyc-upload',
     '/referrals': 'affiliates',
     '/admin': 'admin',
     '/admin/login': 'admin',
@@ -155,6 +159,7 @@ export default function App() {
     'my-profile': '/profile',
     'account-settings': '/settings',
     'security-settings': '/security',
+    'kyc-upload': '/kyc',
     'affiliates': '/referrals',
     'admin': '/admin',
   };
@@ -193,6 +198,19 @@ export default function App() {
   const [simulationCountry, setSimulationCountry] = useState<string>(
     () => localStorage.getItem("coinloot_sim_country_v3") || "BD"
   );
+
+  // ── Level-up celebration ──
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpLevel, setLevelUpLevel] = useState(1);
+  const prevLevelRef = useRef(0);
+  const profileLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (userProfile && !profileLoadedRef.current) {
+      profileLoadedRef.current = true;
+      prevLevelRef.current = calcLevel(userProfile.total_earned_coins);
+    }
+  }, [userProfile]);
 
   // ── Reward popup queue ──
   const { popups: rewardPopups, addPopup, dismissPopup } = usePopupQueue();
@@ -334,11 +352,13 @@ export default function App() {
     setUserProfile((prev) => {
       if (!prev) return prev;
       const newCoins = prev.balance_coins + coins;
+      const newTotalEarned = prev.total_earned_coins + coins;
       return {
         ...prev,
         balance_coins: newCoins,
         balance_usd: newCoins / 1000,
-        total_earned_coins: prev.total_earned_coins + coins,
+        total_earned_coins: newTotalEarned,
+        level: calcLevel(newTotalEarned),
       };
     });
 
@@ -362,12 +382,25 @@ export default function App() {
       message: finalMessage,
     });
 
-    // 5. Update live earnings feed
+    // 5. Check level-up
+    const oldLevel = prevLevelRef.current;
+    const newUser = userProfile;
+    if (newUser) {
+      const newTotal = newUser.total_earned_coins + coins;
+      const newLevel = calcLevel(newTotal);
+      if (newLevel > oldLevel) {
+        setLevelUpLevel(newLevel);
+        setShowLevelUp(true);
+        prevLevelRef.current = newLevel;
+      }
+    }
+
+    // 6. Update live earnings feed
     setLiveEarnerFeed(prev => [
       { id: `fe-${Math.random()}`, user: usernameRef.current, provider: sourceName, coins },
       ...prev.slice(0, 3)
     ]);
-  }, [setUserProfile, addNotification, addPopup]);
+  }, [setUserProfile, addNotification, addPopup, userProfile]);
 
   // ── VPN Detection ──
   const vpnDetectedRef = useRef(false);
@@ -559,9 +592,8 @@ export default function App() {
           onRewardEarned={handleRewardEarned}
           onLogout={handleLogout}
           notifications={notifications}
-          onMarkNotificationRead={handleMarkNotificationRead}
-          onMarkAllRead={handleMarkAllRead}
         />
+        <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
         <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
         {userProfile && <RestrictionPage userId={userProfile.id} />}
         {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}
@@ -1010,6 +1042,9 @@ export default function App() {
               {activeTab === "security-settings" && (
                 <SecuritySettingsPage user={userProfile} setUser={setUserProfile} />
               )}
+              {activeTab === "kyc-upload" && (
+                <KycUploadPage user={userProfile} setUser={setUserProfile} />
+              )}
               {activeTab === "affiliates" && (
                 <ReferralsAffiliates user={userProfile} />
               )}
@@ -1020,6 +1055,7 @@ export default function App() {
         )}
       </main>
 
+      <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
       <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
       {userProfile && <RestrictionPage userId={userProfile.id} />}
       {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}

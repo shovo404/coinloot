@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "../lib/supabase";
+import { getSupabaseClient } from "../lib/supabase";
 
 export interface DashboardStats {
   // Users
@@ -123,6 +123,8 @@ export function useAdminDashboard(): {
     setError(null);
 
     try {
+      const sb = getSupabaseClient();
+      if (!sb) { setLoading(false); return; }
       const today = new Date().toISOString().split("T")[0];
       const weekStart = getWeekStart();
       const monthStart = getMonthStart();
@@ -130,39 +132,39 @@ export function useAdminDashboard(): {
       // Run all queries in parallel
       const results = await Promise.allSettled([
         // Users
-        supabase.from("profiles").select("*", { count: "exact", head: true }),
-        supabase.from("profiles").select("*", { count: "exact", head: true }).eq("is_banned", false),
-        supabase.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", today),
-        supabase.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", weekStart),
-        supabase.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", monthStart),
+        sb.from("profiles").select("*", { count: "exact", head: true }),
+        sb.from("profiles").select("*", { count: "exact", head: true }).eq("is_banned", false),
+        sb.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", today),
+        sb.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", weekStart),
+        sb.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", monthStart),
         // Earnings aggregates
-        supabase.from("profiles").select("total_earned_coins"),
-        supabase.from("withdrawals").select("coins_deducted").eq("status", "APPROVED"),
-        supabase.from("withdrawals").select("usd_value").eq("status", "APPROVED"),
+        sb.from("profiles").select("total_earned_coins"),
+        sb.from("withdrawals").select("coins_deducted").eq("status", "APPROVED"),
+        sb.from("withdrawals").select("usd_value").eq("status", "APPROVED"),
         // Earnings by period
-        supabase.from("earnings_history").select("coins_earned").gte("created_at", today),
-        supabase.from("earnings_history").select("coins_earned").gte("created_at", weekStart),
-        supabase.from("earnings_history").select("coins_earned").gte("created_at", monthStart),
+        sb.from("earnings_history").select("coins_earned").gte("created_at", today),
+        sb.from("earnings_history").select("coins_earned").gte("created_at", weekStart),
+        sb.from("earnings_history").select("coins_earned").gte("created_at", monthStart),
         // Withdrawal counts
-        supabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "PENDING"),
-        supabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "APPROVED"),
-        supabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "REJECTED"),
-        supabase.from("withdrawals").select("*", { count: "exact", head: true }),
+        sb.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "PENDING"),
+        sb.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "APPROVED"),
+        sb.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "REJECTED"),
+        sb.from("withdrawals").select("*", { count: "exact", head: true }),
         // Offerwalls
-        supabase.from("offerwalls").select("*", { count: "exact", head: true }),
-        supabase.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "ACTIVE"),
-        supabase.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "INACTIVE"),
-        supabase.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "LOCKED"),
+        sb.from("offerwalls").select("*", { count: "exact", head: true }),
+        sb.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "ACTIVE"),
+        sb.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "INACTIVE"),
+        sb.from("offerwalls").select("*", { count: "exact", head: true }).eq("status", "LOCKED"),
         // Profiles for country / top earners / growth
-        supabase.from("profiles").select("country, total_earned_coins, username, level, balance_coins, created_at").order("total_earned_coins", { ascending: false }).limit(100),
+        sb.from("profiles").select("country, total_earned_coins, username, level, balance_coins, created_at").order("total_earned_coins", { ascending: false }).limit(100),
         // Recent earnings activity (live_earnings has username column)
-        supabase.from("live_earnings").select("username, provider, coins_earned, created_at").order("created_at", { ascending: false }).limit(20),
+        sb.from("live_earnings").select("username, provider, coins_earned, created_at").order("created_at", { ascending: false }).limit(20),
         // Withdrawal methods
-        supabase.from("withdrawals").select("payout_method, usd_value"),
+        sb.from("withdrawals").select("payout_method, usd_value"),
         // Daily earnings for charts (last 7 days)
-        supabase.from("earnings_history").select("coins_earned, created_at").gte("created_at", getDaysAgo(6)),
+        sb.from("earnings_history").select("coins_earned, created_at").gte("created_at", getDaysAgo(6)),
         // User growth (users created per day for last 7 days)
-        supabase.from("profiles").select("created_at").gte("created_at", getDaysAgo(6)),
+        sb.from("profiles").select("created_at").gte("created_at", getDaysAgo(6)),
       ]);
 
       // Safe extractors
