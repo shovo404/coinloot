@@ -1,0 +1,6 @@
+{
+  "name": "Coin Loot",
+  "description": "Futuristic premium GPT & Offerwall platform with modular dashboards, live stats, gamification, and AI-powered recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
