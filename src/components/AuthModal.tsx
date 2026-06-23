@@ -237,6 +237,11 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
 
     saveAccounts([...accounts, newAccount]);
 
+    // Also save to coinloot_user_profiles for KYC/admin panel sync
+    const existingProfiles = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
+    existingProfiles.push(newProfile);
+    localStorage.setItem("coinloot_user_profiles", JSON.stringify(existingProfiles));
+
     notifyRegistration(newProfile.id, trimmedUsername, trimmedEmail, "", password);
 
     setSuccessMsg("Account created successfully! Signing you in...");

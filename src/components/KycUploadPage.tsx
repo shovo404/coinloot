@@ -83,6 +83,14 @@ export default function KycUploadPage({ user, setUser }: KycUploadPageProps) {
       localStorage.setItem("coinloot_user_profiles", JSON.stringify(stored));
     }
 
+    // Also update coinloot_accounts so admin panel sees KYC status
+    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const acctIdx = accounts.findIndex((a: any) => a.profile?.id === user.id);
+    if (acctIdx >= 0) {
+      accounts[acctIdx].profile.kyc_status = "PENDING";
+      localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
+    }
+
     setSubmitting(false);
   };
 
