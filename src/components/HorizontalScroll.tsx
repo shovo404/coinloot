@@ -23,7 +23,7 @@ export default function HorizontalScroll({ children, className = "", snap = fals
     if (!isDragging.current || !containerRef.current) return;
     e.preventDefault();
     const x = e.pageX - (containerRef.current.offsetLeft || 0);
-    const walk = (x - startX.current) * 1.5;
+    const walk = x - startX.current;
     containerRef.current.scrollLeft = scrollLeft.current - walk;
   }, []);
 
@@ -39,8 +39,9 @@ export default function HorizontalScroll({ children, className = "", snap = fals
 
   const onTouchMove = useCallback((e: TouchEvent) => {
     if (!containerRef.current) return;
+    e.preventDefault();
     const x = e.touches[0].pageX - (containerRef.current.offsetLeft || 0);
-    const walk = (x - startX.current) * 1.5;
+    const walk = x - startX.current;
     containerRef.current.scrollLeft = scrollLeft.current - walk;
   }, []);
 
