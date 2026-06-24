@@ -9,7 +9,7 @@ import KycUploadPage from "./components/KycUploadPage";
 import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnSettings } from "./utils/vpnDetector";
 import { calcLevelFromBalance } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
-import { getSupabaseClient, getCurrentSession } from "./lib/supabase";
+import { getSupabaseClient, getCurrentUser } from "./lib/supabase";
 import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut } from "./lib/supabaseService";
 
 import AnimatedBackground from "./components/AnimatedBackground";
@@ -139,48 +139,52 @@ export default function App() {
       return;
     }
 
-    let resolved = false;
+    let cancelled = false;
     let authUnsub: (() => void) | null = null;
 
-    // Subscribe FIRST to avoid race conditions with onAuthStateChange
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        if (session?.user) {
-          const profile = await getProfile(session.user.id);
-          if (profile) {
-            setUserProfile(profile);
-            setIsDashboardView(true);
-            if (profile.is_admin) {
-              setActiveTab("admin");
-            }
+    async function init() {
+      // 1. Validate session with server (handles token refresh, rejects expired ones)
+      const user = await getCurrentUser();
+      if (cancelled) return;
+      if (user) {
+        const profile = await getProfile(user.id);
+        if (profile && !cancelled) {
+          setUserProfile(profile);
+          setIsDashboardView(true);
+          if (profile.is_admin) {
+            setActiveTab("admin");
           }
         }
-      } else if (event === "SIGNED_OUT") {
-        setUserProfile(null);
-        setIsDashboardView(false);
-        setShowAdminLogin(false);
-        setNotifications([]);
       }
-      if (!resolved) {
-        resolved = true;
-        setSessionLoaded(true);
-      }
-    });
+      if (!cancelled) setSessionLoaded(true);
 
-    // Fallback: if no event fires within 3s, unblock UI anyway
-    const fallback = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        setSessionLoaded(true);
-      }
-    }, 3000);
+      // 2. Listen for future auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+          if (session?.user) {
+            const profile = await getProfile(session.user.id);
+            if (profile) {
+              setUserProfile(profile);
+              setIsDashboardView(true);
+              if (profile.is_admin) {
+                setActiveTab("admin");
+              }
+            }
+          }
+        } else if (event === "SIGNED_OUT") {
+          setUserProfile(null);
+          setIsDashboardView(false);
+          setShowAdminLogin(false);
+          setNotifications([]);
+        }
+      });
+      authUnsub = () => subscription?.unsubscribe();
+    }
 
-    authUnsub = () => {
-      clearTimeout(fallback);
-      subscription?.unsubscribe();
-    };
+    init();
 
     return () => {
+      cancelled = true;
       if (authUnsub) authUnsub();
     };
   }, [supabase]);
