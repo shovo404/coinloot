@@ -19,6 +19,7 @@ import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, 
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
+import { updateWithdrawalStatus } from "../lib/supabaseService";
 import * as AdminDb from "../lib/adminDb";
 import { 
   getSocialBountyConfig, saveSocialBountyConfig, 

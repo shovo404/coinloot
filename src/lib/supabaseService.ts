@@ -260,27 +260,41 @@ export async function createWithdrawal(
 
 export async function getWithdrawals(userId?: string): Promise<WithdrawalRequest[]> {
   const sb = getSupabaseClient();
-  if (!sb) return [];
+  if (sb) {
+    try {
+      let query = sb.from("withdrawals").select("*").order("created_at", { ascending: false });
 
-  let query = sb.from("withdrawals").select("*").order("created_at", { ascending: false });
+      if (userId) query = query.eq("user_id", userId);
 
-  if (userId) query = query.eq("user_id", userId);
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        return data.map((w: any) => ({
+          id: w.id,
+          user_id: w.user_id,
+          username: w.username,
+          reward_name: w.reward_name,
+          payout_method: w.payout_method,
+          payout_details: w.payout_details,
+          coins_deducted: w.coins_deducted,
+          usd_value: w.usd_value,
+          status: w.status,
+          created_at: w.created_at,
+        }));
+      }
+    } catch {}
+  }
 
-  const { data, error } = await query;
-  if (error || !data) return [];
+  // Fallback to localStorage
+  try {
+    const stored = localStorage.getItem("coinloot_withdrawals_v3");
+    if (stored) {
+      const parsed: WithdrawalRequest[] = JSON.parse(stored);
+      if (userId) return parsed.filter((w) => w.user_id === userId);
+      return parsed;
+    }
+  } catch {}
 
-  return data.map((w: any) => ({
-    id: w.id,
-    user_id: w.user_id,
-    username: w.username,
-    reward_name: w.reward_name,
-    payout_method: w.payout_method,
-    payout_details: w.payout_details,
-    coins_deducted: w.coins_deducted,
-    usd_value: w.usd_value,
-    status: w.status,
-    created_at: w.created_at,
-  }));
+  return [];
 }
 
 export async function updateWithdrawalStatus(
@@ -400,16 +414,35 @@ export async function validatePromoCode(code: string, userId: string) {
 
 export async function getNotifications(userId: string) {
   const sb = getSupabaseClient();
-  if (!sb) return [];
+  if (sb) {
+    try {
+      const { data } = await sb
+        .from("notifications")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(50);
 
-  const { data } = await sb
-    .from("notifications")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(50);
+      if (data && data.length > 0) {
+        return data;
+      }
+    } catch {}
+  }
 
-  return data || [];
+  // Fallback to localStorage
+  try {
+    const stored = localStorage.getItem("coinloot_notifications");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((n: any) => !n.user_id || n.user_id === userId)
+          .slice(0, 50);
+      }
+    }
+  } catch {}
+
+  return [];
 }
 
 export async function markNotificationRead(notificationId: string) {
@@ -575,12 +608,59 @@ export async function getAllSiteSettings() {
 
 export async function getWithdrawalMethods(): Promise<any[]> {
   const sb = getSupabaseClient();
-  if (!sb) return [];
+  if (sb) {
+    try {
+      const { data } = await sb
+        .from("withdrawal_methods")
+        .select("*")
+        .order("sort_order");
 
-  const { data } = await sb
-    .from("withdrawal_methods")
-    .select("*")
-    .order("sort_order");
+      if (data && data.length > 0) {
+        // Map snake_case DB columns to camelCase expected by the component
+        return data.map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          icon: m.icon || "💳",
+          minCoins: m.min_coins || 1000,
+          type: m.name?.toLowerCase().replace(/[^a-z0-9]/g, "_") || "wallet",
+          fieldLabel: "Wallet Address / Account",
+          placeholder: `Enter your ${m.name} details`,
+          description: m.instructions || `Withdraw via ${m.name}. Min: ${(m.min_coins || 1000).toLocaleString()} coins.`,
+          status: m.status,
+          maxCoins: m.max_coins,
+          feePercent: m.fee_percent,
+        }));
+      }
+    } catch {}
+  }
 
-  return data || [];
+  // Fallback to localStorage (admin panel stores withdrawal methods here)
+  try {
+    const stored = localStorage.getItem("coinloot_payment_methods");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((m: any) => ({
+          id: m.id || `pm-${Math.random().toString(36).substring(2, 6)}`,
+          name: m.name,
+          icon: m.icon || "💳",
+          minCoins: m.minCoins || 1000,
+          type: m.name?.toLowerCase().replace(/[^a-z0-9]/g, "_") || "wallet",
+          fieldLabel: "Wallet Address / Account",
+          placeholder: `Enter your ${m.name} details`,
+          description: `Withdraw via ${m.name}. Min: ${(m.minCoins || 1000).toLocaleString()} coins.`,
+          status: m.status || "ACTIVE",
+          maxCoins: m.maxCoins,
+          feePercent: m.feePercent,
+        }));
+      }
+    }
+  } catch {}
+
+  // Ultimate fallback: default active methods only
+  return [
+    { id: "paypal", name: "PayPal", icon: "💎", minCoins: 1000, type: "paypal", fieldLabel: "PayPal Email", placeholder: "Enter your PayPal email", description: "Withdraw via PayPal. Min: 1,000 coins.", status: "ACTIVE" },
+    { id: "binance", name: "Binance Pay", icon: "🌐", minCoins: 1000, type: "binance", fieldLabel: "Binance UID / Email", placeholder: "Enter your Binance UID or email", description: "Withdraw via Binance Pay. Min: 1,000 coins.", status: "ACTIVE" },
+    { id: "usdt", name: "USDT (TRC-20)", icon: "₮", minCoins: 2000, type: "usdt", fieldLabel: "USDT Wallet Address", placeholder: "Enter your TRC-20 wallet address", description: "Withdraw via USDT (TRC-20). Min: 2,000 coins.", status: "ACTIVE" },
+  ];
 }

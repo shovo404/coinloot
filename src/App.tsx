@@ -358,6 +358,17 @@ export default function App() {
           return [mapped, ...prev.slice(0, 49)];
         });
         playNotificationSound();
+        if (n.coins_earned > 0) {
+          playCoinSound();
+          addPopup({
+            id: `rp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            sourceName: n.source_name || "Admin",
+            coins: n.coins_earned,
+            message: n.title + (n.message ? ` – ${n.message}` : ""),
+          });
+        }
+        // Track this ID so the localStorage poll doesn't double-fire sound+popup
+        prevNotifIdsRef.current = new Set(prevNotifIdsRef.current).add(n.id);
       },
     });
 
@@ -400,10 +411,11 @@ export default function App() {
     };
   }, [userProfile?.id, supabase]);
 
-  // ── Notifications from Supabase ──
+  // ── Notifications from Supabase + localStorage ──
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const prevNotifIdsRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
+  const loadNotifications = useCallback(() => {
     if (!userProfile) {
       setNotifications([]);
       return;
@@ -413,15 +425,48 @@ export default function App() {
         id: n.id,
         title: n.title,
         description: n.message || n.description,
-        time: n.created_at,
-        category: n.category || "system",
-        unread: !n.is_read,
-        coinsEarned: n.coins_earned,
-        sourceName: n.source_name,
+        time: n.created_at || n.time,
+        category: n.category || n.notification_type || "system",
+        unread: n.unread !== undefined ? n.unread : !n.is_read,
+        coinsEarned: n.coinsEarned ?? n.coins_earned,
+        sourceName: n.sourceName || n.source_name,
       }));
+
+      // Detect new coin notifications for sound + popup
+      const currentIds = new Set(mapped.map((n) => n.id));
+      const prevIds = prevNotifIdsRef.current;
+      if (prevIds.size > 0) {
+        for (const notif of mapped) {
+          if (!prevIds.has(notif.id) && (notif.coinsEarned ?? 0) > 0) {
+            playCoinSound();
+            addPopup({
+              id: `rp-n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              sourceName: notif.sourceName || "Admin",
+              coins: notif.coinsEarned ?? 0,
+              message: notif.title + (notif.description ? ` – ${notif.description}` : ""),
+            });
+            break; // one popup per poll cycle
+          }
+        }
+      }
+      prevNotifIdsRef.current = currentIds;
+
       setNotifications(mapped);
     }).catch(() => {});
-  }, [userProfile?.id]);
+  }, [userProfile?.id, addPopup]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  // Poll localStorage for new notifications (for demo/localStorage users without Supabase realtime)
+  useEffect(() => {
+    if (!userProfile) return;
+    const interval = setInterval(() => {
+      loadNotifications();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [userProfile?.id, loadNotifications]);
 
   const addNotification = useCallback((title: string, description: string, category: AppNotification["category"], coinsEarned?: number, sourceName?: string) => {
     const newNotif: AppNotification = {
@@ -605,6 +650,12 @@ export default function App() {
     } catch (err) {
       console.error("Failed to persist withdrawal:", err);
     }
+    // Persist to localStorage so admin panel sees it
+    try {
+      const existing = JSON.parse(localStorage.getItem("coinloot_withdrawals_v3") || "[]");
+      existing.unshift(req);
+      localStorage.setItem("coinloot_withdrawals_v3", JSON.stringify(existing));
+    } catch {}
   }, [addNotification, userProfile]);
 
   // Auth handlers
