@@ -8,6 +8,7 @@ import { UserProfile, Offer } from "../types";
 import { isUserRestricted } from "../utils/vpnDetector";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getProviderInfo, getProviderLogoUrl, getProviderDomain, getAllProviders } from "../utils/providerLogos";
+import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 
 interface OfferwallHubProps {
   user: UserProfile;
@@ -33,27 +34,7 @@ interface LockRule {
   value: number;
 }
 
-function loadAdminOffers(): AdminOffer[] {
-  try {
-    const saved = localStorage.getItem("coinloot_offers");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch { /* */ }
-  return [];
-}
 
-function loadLockRules(): LockRule[] {
-  try {
-    const saved = localStorage.getItem("coinloot_lock_rules");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch { /* */ }
-  return [];
-}
 
 function mapAdminOfferToUser(admin: AdminOffer): Offer {
   const providerInfo = getProviderInfo(admin.provider);
@@ -105,15 +86,17 @@ const FALLBACK_OFFERS: Offer[] = [
 ];
 
 export default function OfferwallHub({ user, setUser, onRewardEarned, simulationCountry }: OfferwallHubProps) {
+  const { state } = useAppRealtimeState();
+  const lockRules = state.lockRules;
+  const adminOffers = state.offers;
+
   const [offers, setOffers] = useState<Offer[]>(() => {
-    const adminOffers = loadAdminOffers();
     if (adminOffers.length > 0) {
       return adminOffers.map(mapAdminOfferToUser);
     }
     return FALLBACK_OFFERS;
   });
 
-  const [lockRules, setLockRules] = useState<LockRule[]>(() => loadLockRules());
   const [selectedProvider, setSelectedProvider] = useState<string>("All");
   const [activeCategoryTab, setActiveCategoryTab] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -122,14 +105,12 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
   const restriction = isUserRestricted(user.id);
   const isRestricted = restriction.restricted;
 
-  // Reload offers from admin panel when component mounts/updates
+  // Re-sync offers when context or user balance changes
   useEffect(() => {
-    const updated = loadAdminOffers();
-    if (updated.length > 0) {
-      setOffers(updated.map(mapAdminOfferToUser));
+    if (adminOffers.length > 0) {
+      setOffers(adminOffers.map(mapAdminOfferToUser));
     }
-    setLockRules(loadLockRules());
-  }, [user.balance_coins]);
+  }, [adminOffers, user.balance_coins]);
 
   // AI recommendations state
   const [aiReasons, setAiReasons] = useState<Record<string, string>>({});
@@ -167,9 +148,8 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
   // Compute lock status for each offer
   const lockStatusMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
-    const adminOffers = loadAdminOffers();
     if (adminOffers.length > 0) {
-      adminOffers.forEach((ao) => {
+      adminOffers.forEach((ao: any) => {
         if (ao.status === "locked") {
           const evalResult = evaluateLockRules(user, lockRules);
           map.set(ao.id, evalResult.locked ? evalResult : { locked: true, reason: "Locked by admin" });
@@ -179,7 +159,7 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
       });
     }
     return map;
-  }, [offers, lockRules, user]);
+  }, [adminOffers, lockRules, user]);
 
   // Handle simulate completion of offer
   const completeOfferSimulator = (offer: Offer) => {

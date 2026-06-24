@@ -566,6 +566,68 @@ create table if not exists public.promo_code_redemptions (
 );
 
 -- ════════════════════════════════════════════════════════════════════
+-- 9c. KYC Records
+-- ════════════════════════════════════════════════════════════════════
+
+create table if not exists public.kyc_records (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  doc_type text not null,
+  front_image_url text,
+  back_image_url text,
+  selfie_url text,
+  status text not null default 'PENDING' check (status in ('PENDING', 'APPROVED', 'REJECTED')),
+  submitted_at timestamptz default now(),
+  reviewed_at timestamptz,
+  reviewed_by uuid references public.profiles(id) on delete set null
+);
+
+create index if not exists idx_kyc_records_user_id on public.kyc_records(user_id);
+create index if not exists idx_kyc_records_status on public.kyc_records(status);
+
+alter table public.kyc_records enable row level security;
+
+drop policy if exists "Users can view own KYC" on public.kyc_records;
+create policy "Users can view own KYC" on public.kyc_records
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own KYC" on public.kyc_records;
+create policy "Users can insert own KYC" on public.kyc_records
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "Admins can view all KYC" on public.kyc_records;
+create policy "Admins can view all KYC" on public.kyc_records
+  for select using (
+    exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)
+  );
+
+drop policy if exists "Admins can update KYC" on public.kyc_records;
+create policy "Admins can update KYC" on public.kyc_records
+  for update using (
+    exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)
+  );
+
+create or replace function public.fn_sync_kyc_status()
+returns trigger
+language plpgsql
+security definer
+as $$
+begin
+  update public.profiles
+  set kyc_status = new.status
+  where id = new.user_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists tr_sync_kyc_status on public.kyc_records;
+create trigger tr_sync_kyc_status
+  after insert or update of status on public.kyc_records
+  for each row
+  execute function public.fn_sync_kyc_status();
+
+
+-- ════════════════════════════════════════════════════════════════════
 -- 10. REWARDS SYSTEM
 -- ════════════════════════════════════════════════════════════════════
 

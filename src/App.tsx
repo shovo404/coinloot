@@ -22,7 +22,6 @@ import EarnPage from "./components/EarnPage";
 import RewardsStore from "./components/RewardsStore";
 import ReferralsAffiliates from "./components/ReferralsAffiliates";
 import LeaderboardPodium from "./components/LeaderboardPodium";
-import OfferwallShowcase from "./components/OfferwallShowcase";
 import AdminLayout from "./components/AdminLayout";
 import VpnBlockPopup from "./components/VpnBlockPopup";
 import RestrictionPage from "./components/RestrictionPage";
@@ -786,9 +785,6 @@ export default function App() {
                 ))}
               </div>
             </section>
-
-            {/* ── Premium Offerwall Showcase ── */}
-            <OfferwallShowcase />
 
             {/* ── Featured Offerwalls ── */}
             <section className="max-w-7xl mx-auto px-4 lg:px-8 mb-20">

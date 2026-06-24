@@ -112,6 +112,7 @@ export interface VpnSettings {
   vpnDetection: boolean;
   vpnWarning: boolean;
   vpnBlock: boolean;
+  withdrawalBlock: boolean;
   restrictDuration: number;
 }
 
@@ -120,7 +121,7 @@ export async function getVpnSettingsDb(): Promise<VpnSettings> {
   if (val) {
     try { return JSON.parse(val); } catch {}
   }
-  return { vpnDetection: true, vpnWarning: true, vpnBlock: true, restrictDuration: 30 };
+  return { vpnDetection: true, vpnWarning: true, vpnBlock: true, withdrawalBlock: true, restrictDuration: 30 };
 }
 
 export async function saveVpnSettingsDb(settings: VpnSettings) {
@@ -454,6 +455,34 @@ export async function updateTicketStatus(id: string, status: string) {
   const sb = getSupabaseClient();
   if (!sb) return;
   await sb.from("support_tickets").update({ status }).eq("id", id);
+}
+
+// ─── Offers (admin CRUD) ─────────────────────────────────────────────────────
+
+export async function getOffers(): Promise<any[]> {
+  const val = await getSetting("offers");
+  if (val) {
+    try { return JSON.parse(val); } catch {}
+  }
+  return [];
+}
+
+export async function saveOffers(offers: any[]) {
+  await setSetting("offers", JSON.stringify(offers));
+}
+
+// ─── Promo Codes (stored in site_settings as JSON blob) ──────────────────────
+
+export async function getPromoCodes(): Promise<any[]> {
+  const val = await getSetting("promo_codes");
+  if (val) {
+    try { return JSON.parse(val); } catch {}
+  }
+  return [];
+}
+
+export async function savePromoCodes(codes: any[]) {
+  await setSetting("promo_codes", JSON.stringify(codes));
 }
 
 // ─── Site Settings (generic read/write) ────────────────────────────────────

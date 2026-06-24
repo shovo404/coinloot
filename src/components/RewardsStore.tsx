@@ -7,10 +7,10 @@ import { UserProfile } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { playCoinSound } from "../utils/coinSound";
 import { 
-  getSocialBountyConfig, getWeeklyChallengeConfig, 
-  checkLevelRequirement,
-  SocialBountyConfig, WeeklyChallengeConfig 
+  checkLevelRequirement
 } from "../utils/rewardsConfig";
+import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
+import { savePromoCodes as savePromoCodesDb } from "../lib/adminDb";
 
 interface RewardsStoreProps {
   user: UserProfile;
@@ -28,6 +28,11 @@ interface SocialReward {
 }
 
 export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsStoreProps) {
+  const { state } = useAppRealtimeState();
+  const bountyConfig = state.rewardsConfig.socialBounty;
+  const challengeConfig = state.rewardsConfig.weeklyChallenge;
+  const globalPromo = state.globalPromo;
+
   const [promoCodeInput, setPromoCodeInput] = useState("");
   const [promoError, setPromoError] = useState("");
   const [promoSuccess, setPromoSuccess] = useState("");
@@ -49,21 +54,6 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
   ]);
 
   const [weeklyClaimed, setWeeklyClaimed] = useState(false);
-
-  // ── Load admin-driven configs with real-time sync ──
-  const [bountyConfig, setBountyConfig] = useState<SocialBountyConfig>(getSocialBountyConfig);
-  const [challengeConfig, setChallengeConfig] = useState<WeeklyChallengeConfig>(getWeeklyChallengeConfig);
-
-  useEffect(() => {
-    const onBountyChange = (e: CustomEvent) => setBountyConfig(e.detail);
-    const onChallengeChange = (e: CustomEvent) => setChallengeConfig(e.detail);
-    window.addEventListener("social-bounty-changed", onBountyChange as EventListener);
-    window.addEventListener("weekly-challenge-changed", onChallengeChange as EventListener);
-    return () => {
-      window.removeEventListener("social-bounty-changed", onBountyChange as EventListener);
-      window.removeEventListener("weekly-challenge-changed", onChallengeChange as EventListener);
-    };
-  }, []);
 
   // Claim Streak handler
   const claimStreakDay = (dayIndex: number) => {
@@ -111,11 +101,8 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     const code = promoCodeInput.trim().toUpperCase();
     if (!code) return;
 
-    // Load admin-created promo codes from localStorage
-    const adminCodes: any[] = (() => {
-      try { return JSON.parse(localStorage.getItem("coinloot_promo_codes") || "[]"); }
-      catch { return []; }
-    })();
+    // Load admin-created promo codes from context (synced with Supabase)
+    const adminCodes: any[] = state.promoCodes;
 
     // Check hardcoded codes as fallback
     const hardcodedCodes: Record<string, number> = { "NITRO2026": 250, "COINLOOT": 250, "BONUS500": 500 };
@@ -153,6 +140,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       // Update usage count
       match.currentUses += 1;
       localStorage.setItem("coinloot_promo_codes", JSON.stringify(adminCodes));
+      savePromoCodesDb(adminCodes).catch(err => console.warn("[PromoCodes] DB sync failed:", err));
       playCoinSound();
       onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
       setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
@@ -179,9 +167,10 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       setPromoCodeInput("");
     } else {
       // Check global notification promo code
-      const globalCode = localStorage.getItem("coinloot_global_notif_promo_code") || "";
-      const globalEnabled = JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false");
-      const globalCoins = parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0");
+      const globalCode = globalPromo.promoCode || "";
+      const globalEnabled = globalPromo.promoEnabled || false;
+      const globalCoins = globalPromo.promoCoins || 0;
+      const globalDurationSec = globalPromo.promoDuration || 0;
       if (globalEnabled && globalCode && code === globalCode.toUpperCase() && globalCoins > 0) {
         const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
         if (claimed.includes(code)) {
@@ -190,16 +179,12 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         }
         // Check expiry
         const startRaw = localStorage.getItem("coinloot_global_notif_promo_start");
-        const durRaw = localStorage.getItem("coinloot_global_notif_promo_duration");
-        if (startRaw && durRaw) {
-          try {
-            const dur = JSON.parse(durRaw);
-            const ms = (dur.days || 0) * 86400000 + (dur.hours || 0) * 3600000 + (dur.mins || 0) * 60000 + (dur.secs || 0) * 1000;
-            if (Date.now() >= parseInt(startRaw) + ms) {
-              setPromoError("This promo code has expired.");
-              return;
-            }
-          } catch {}
+        if (startRaw && globalDurationSec > 0) {
+          const ms = globalDurationSec * 1000;
+          if (Date.now() >= parseInt(startRaw) + ms) {
+            setPromoError("This promo code has expired.");
+            return;
+          }
         }
         const payout = globalCoins;
         const newCoins = user.balance_coins + payout;

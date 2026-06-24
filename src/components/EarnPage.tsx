@@ -17,6 +17,7 @@ import SurveyHub from "./SurveyHub";
 import VpnBlockPopup from "./VpnBlockPopup";
 import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
 import LockedOfferwallCard from "./LockedOfferwallCard";
+import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 
 interface EarnPageProps {
   user: UserProfile;
@@ -67,28 +68,6 @@ const FALLBACK_HOT: Offer[] = [
   { id: "hot-6", title: "Wannads Offer Exchange", description: "Complete Wannads offers from global advertisers. Instant credit.", payout_coins: 1600, category: "trending", provider: "Wannads", imageUrl: "/logos/wannads.png", difficulty: "Easy", link: "https://wannads.com" },
 ];
 
-function loadAdminOffers(): AdminOffer[] {
-  try {
-    const saved = localStorage.getItem("coinloot_offers");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch { }
-  return [];
-}
-
-function loadLockRules(): LockRule[] {
-  try {
-    const saved = localStorage.getItem("coinloot_lock_rules");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch { }
-  return [];
-}
-
 function evaluateLockRules(user: UserProfile, rules: LockRule[]): { locked: boolean; reason: string } {
   for (const rule of rules) {
     if (rule.type === "coins_earned" && user.total_earned_coins < rule.value)
@@ -102,6 +81,12 @@ function evaluateLockRules(user: UserProfile, rules: LockRule[]): { locked: bool
 }
 
 export default function EarnPage({ user, setUser, onRewardEarned, simulationCountry }: EarnPageProps) {
+  const { state } = useAppRealtimeState();
+  const lockRules = state.lockRules;
+  const visibleSections = state.homepageSections;
+  const globalPromo = state.globalPromo;
+  const adminOffers = state.offers;
+
   const [viewingOffer, setViewingOffer] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [apiOffers, setApiOffers] = useState<Offer[]>([]);
@@ -110,15 +95,9 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const restriction = isUserRestricted(user.id);
   const isRestricted = restriction.restricted;
 
-  const [lockRules, setLockRules] = useState<LockRule[]>(() => loadLockRules());
-  useEffect(() => { setLockRules(loadLockRules()); }, [user.balance_coins]);
-
   const lockEval = useMemo(() => evaluateLockRules(user, lockRules), [user, lockRules]);
 
   const allProviders = useMemo(() => getAllProviders(), []);
-
-  const [adminOffers, setAdminOffers] = useState<AdminOffer[]>(() => loadAdminOffers());
-  useEffect(() => { setAdminOffers(loadAdminOffers()); }, [user.balance_coins]);
 
   const [lockedUnlockTick, setLockedUnlockTick] = useState(0);
   const lockedConfigs = useMemo(() => {
@@ -130,28 +109,6 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const handleLockedUnlocked = (providerName: string) => {
     setLockedUnlockTick((t) => t + 1);
   };
-
-  const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem("coinloot_homepage_sections");
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return { featured: true, hot: true, surveys: true, offerwalls: true };
-  });
-  useEffect(() => {
-    const handler = () => {
-      try {
-        const saved = localStorage.getItem("coinloot_homepage_sections");
-        if (saved) setVisibleSections(JSON.parse(saved));
-      } catch {}
-    };
-    window.addEventListener("storage", handler);
-    window.addEventListener("homepage-sections-changed", handler);
-    return () => {
-      window.removeEventListener("storage", handler);
-      window.removeEventListener("homepage-sections-changed", handler);
-    };
-  }, []);
 
   // Auto-fetch offers from connected offerwall providers
   useEffect(() => {
@@ -327,7 +284,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   return (
     <section className="px-4 lg:px-8 py-6 max-w-7xl mx-auto space-y-8">
       {/* ═══════════════════ NOTIFICATIONS ═══════════════════ */}
-      <NotificationCards user={user} setUser={setUser} onRewardEarned={onRewardEarned} />
+      <NotificationCards user={user} setUser={setUser} onRewardEarned={onRewardEarned} globalPromo={globalPromo} />
 
       {/* ═══════════════════ FEATURED OFFERS ═══════════════════ */}
       {visibleSections.featured && (
@@ -760,40 +717,18 @@ function CountdownTimer({ expiresAt }: { expiresAt: string }) {
   );
 }
 
-function NotificationCards({ user, setUser, onRewardEarned }: { user: UserProfile; setUser: (u: UserProfile) => void; onRewardEarned?: (coins: number, sourceName: string, message?: string) => void }) {
-  const [notifText, setNotifText] = useState(() => localStorage.getItem("coinloot_global_notif_text") || "");
-  const [promoEnabled, setPromoEnabled] = useState(() => JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
-  const [promoCode, setPromoCode] = useState(() => localStorage.getItem("coinloot_global_notif_promo_code") || "");
-  const [promoCoins, setPromoCoins] = useState(() => parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
-  const [promoDuration, setPromoDuration] = useState(() => {
-    try { const d = JSON.parse(localStorage.getItem("coinloot_global_notif_promo_duration") || "{}"); return d; } catch { return { days: 0, hours: 0, mins: 30, secs: 0 }; }
-  });
+function NotificationCards({ user, setUser, onRewardEarned, globalPromo }: { user: UserProfile; setUser: (u: UserProfile) => void; onRewardEarned?: (coins: number, sourceName: string, message?: string) => void; globalPromo: any }) {
+  const notifText = globalPromo?.text || "";
+  const promoEnabled = globalPromo?.promoEnabled || false;
+  const promoCode = globalPromo?.promoCode || "";
+  const promoCoins = globalPromo?.promoCoins || 0;
+  const promoDurationSec = globalPromo?.promoDuration || 0;
   const [claimed, setClaimed] = useState(() => {
     const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
-    const code = localStorage.getItem("coinloot_global_notif_promo_code") || "";
-    return list.includes(code);
+    return list.includes(promoCode);
   });
 
-  const refresh = () => {
-    setNotifText(localStorage.getItem("coinloot_global_notif_text") || "");
-    setPromoEnabled(JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
-    setPromoCode(localStorage.getItem("coinloot_global_notif_promo_code") || "");
-    setPromoCoins(parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
-    const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
-    const code = localStorage.getItem("coinloot_global_notif_promo_code") || "";
-    setClaimed(list.includes(code));
-  };
-
-  useEffect(() => {
-    window.addEventListener("storage", refresh);
-    const poll = setInterval(refresh, 2000);
-    return () => {
-      window.removeEventListener("storage", refresh);
-      clearInterval(poll);
-    };
-  }, []);
-
-  const promoMs = (promoDuration.days || 0) * 86400000 + (promoDuration.hours || 0) * 3600000 + (promoDuration.mins || 0) * 60000 + (promoDuration.secs || 0) * 1000;
+  const promoMs = promoDurationSec * 1000;
   const promoExpiresAt = promoEnabled && promoCode && promoMs > 0
     ? (() => {
         const stored = localStorage.getItem("coinloot_global_notif_promo_start");

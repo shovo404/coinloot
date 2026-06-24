@@ -19,7 +19,7 @@ import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, 
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
-import { saveDeveloperMode, saveHomepageSections, saveLockRules, saveGlobalPromoNotification } from "../lib/adminDb";
+import * as AdminDb from "../lib/adminDb";
 import { 
   getSocialBountyConfig, saveSocialBountyConfig, 
   getWeeklyChallengeConfig, saveWeeklyChallengeConfig, 
@@ -430,13 +430,21 @@ function RewardsChallengesManagement() {
   const [bountyConfig, setBountyConfig] = useState(getSocialBountyConfig);
   const [challengeConfig, setChallengeConfig] = useState(getWeeklyChallengeConfig);
 
-  const saveBounty = () => {
+  const saveBounty = async () => {
     saveSocialBountyConfig(bountyConfig);
+    try {
+      const current = await AdminDb.getRewardsConfig();
+      await AdminDb.saveRewardsConfig({ ...current, socialBounty: bountyConfig });
+    } catch (e) { console.error("Failed to sync bounty config to Supabase", e); }
     alert("Social Bounty settings saved!");
   };
 
-  const saveChallenge = () => {
+  const saveChallenge = async () => {
     saveWeeklyChallengeConfig(challengeConfig);
+    try {
+      const current = await AdminDb.getRewardsConfig();
+      await AdminDb.saveRewardsConfig({ ...current, weeklyChallenge: challengeConfig });
+    } catch (e) { console.error("Failed to sync challenge config to Supabase", e); }
     alert("Weekly Challenge settings saved!");
   };
 
@@ -593,7 +601,7 @@ function RewardsChallengesManagement() {
   );
 }
 
-const DB_TABLES = ["profiles", "users", "withdrawals", "offerwall_providers", "offers", "promo_codes", "support_tickets", "kyc_records", "admin_logs", "admin_notifications", "site_settings"];
+const DB_TABLES = ["profiles", "withdrawals", "withdrawal_methods", "offerwall_providers", "offerwalls", "promo_codes", "support_tickets", "kyc_records", "site_settings", "system_notifications", "notifications", "earnings_history", "live_earnings"];
 function DataBrowserCard() {
   const [selectedTable, setSelectedTable] = useState("profiles");
   const [tableData, setTableData] = useState<any[] | null>(null);
@@ -820,45 +828,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", `IP account limit ${enabled ? "enabled" : "disabled"}`);
   };
 
-  // ── Database Config State ──
-  const [dbProjectName, setDbProjectName] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectName || ""; } catch { return ""; }
-  });
-  const [dbProjectUrl, setDbProjectUrl] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectUrl || ""; } catch { return ""; }
-  });
-  const [dbProjectId, setDbProjectId] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").projectId || ""; } catch { return ""; }
-  });
-  const [dbApiKey, setDbApiKey] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("coinloot_db_config") || "{}").apiKey || ""; } catch { return ""; }
-  });
-  const [dbTestResult, setDbTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [dbTesting, setDbTesting] = useState(false);
-  const [dbKeyVisible, setDbKeyVisible] = useState(false);
-
-  const testDbConnection = async () => {
-    setDbTesting(true);
-    setDbTestResult(null);
-    try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const client = createClient(dbProjectUrl, dbApiKey, { realtime: { params: { eventsPerSecond: 10 } } });
-      const { data, error } = await client.from("_test_connection").select("*").limit(1).maybeSingle();
-      if (error && error.code === "42P01") {
-        setDbTestResult({ ok: true, msg: "Connected! Table not found (expected) — ready to run setup SQL." });
-      } else if (error && error.code === "PGRST301") {
-        setDbTestResult({ ok: true, msg: "Connected! (no rows returned — normal)" });
-      } else if (data !== null) {
-        setDbTestResult({ ok: true, msg: "Connected! Database is ready." });
-      } else {
-        setDbTestResult({ ok: true, msg: "Connected! Database is reachable." });
-      }
-    } catch (err: any) {
-      setDbTestResult({ ok: false, msg: err?.message || "Connection failed" });
-    }
-    setDbTesting(false);
-  };
-
   const testTelegram = async () => {
     const resp = await fetch("/api/telegram/send", {
       method: "POST",
@@ -885,14 +854,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (s.smtpPass) setSmtpPass(s.smtpPass);
     if (s.demoData !== undefined) setDemoData(s.demoData);
     if (s.developerMode !== undefined) setDeveloperMode(s.developerMode);
-    // Load database config
-    try {
-      const db = JSON.parse(localStorage.getItem("coinloot_db_config") || "{}");
-      if (db.projectName) setDbProjectName(db.projectName);
-      if (db.projectUrl) setDbProjectUrl(db.projectUrl);
-      if (db.projectId) setDbProjectId(db.projectId);
-      if (db.apiKey) setDbApiKey(db.apiKey);
-    } catch {}
     // Load telegram config
     try {
       const tc = JSON.parse(localStorage.getItem("coinloot_telegram_config") || "{}");
@@ -959,7 +920,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   const saveSettings = () => {
     localStorage.setItem("coinloot_site_settings", JSON.stringify({ siteName, rate, minWd, smtpHost, smtpPort, smtpUser, smtpPass, demoData, developerMode }));
-    localStorage.setItem("coinloot_db_config", JSON.stringify({ projectName: dbProjectName, projectUrl: dbProjectUrl, projectId: dbProjectId, apiKey: dbApiKey }));
     localStorage.setItem("coinloot_telegram_config", JSON.stringify({ token: telegramToken, chatId: telegramChatId, enabled: telegramEnabled }));
     // Sync to Supabase site_settings table
     const sb = getSupabaseClient();
@@ -977,7 +937,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       sb.from("site_settings").upsert(upsertSettings, { onConflict: "setting_key" }).then(({ error }) => {
         if (error) console.warn("Failed to sync settings to Supabase:", error.message);
       });
-      saveDeveloperMode({ enabled: developerMode, message: "" }).catch(() => {});
+      AdminDb.saveDeveloperMode({ enabled: developerMode, message: "" }).catch(() => {});
     }
     addLog("SETTINGS_UPDATED", "settings", "site", "Updated site settings");
     showNotif("success", "Settings saved!");
@@ -1436,7 +1396,11 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>(() => {
     try { return JSON.parse(localStorage.getItem("coinloot_promo_codes") || "[]"); } catch { return []; }
   });
-  const savePromoCodes = (codes: PromoCode[]) => { localStorage.setItem("coinloot_promo_codes", JSON.stringify(codes)); setPromoCodes(codes); };
+  const savePromoCodes = (codes: PromoCode[]) => {
+    localStorage.setItem("coinloot_promo_codes", JSON.stringify(codes));
+    setPromoCodes(codes);
+    AdminDb.savePromoCodes(codes).catch(err => console.warn("[PromoCodes] DB sync failed:", err));
+  };
 
   // ── Notifications ──
   const sendNotification = (title: string, description: string, type: string) => {
@@ -1833,7 +1797,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                   <button onClick={async () => {
                     const ts = Date.now();
                     localStorage.setItem("coinloot_global_notif_sent_at", String(ts));
-                    await saveGlobalPromoNotification({
+                    await AdminDb.saveGlobalPromoNotification({
                       text: globalNotifText,
                       promoEnabled: globalNotifPromo,
                       promoCode: globalNotifPromoCode,
@@ -1858,7 +1822,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       });
                     } catch {}
                     localStorage.setItem("coinloot_global_notif_sent_at", String(Date.now()));
-                    await saveGlobalPromoNotification({
+                    await AdminDb.saveGlobalPromoNotification({
                       text: globalNotifText,
                       promoEnabled: globalNotifPromo,
                       promoCode: globalNotifPromoCode,
@@ -2301,22 +2265,23 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
     // ═══ OFFERS ═══
     if (section === "offers") {
-      const saveOffers = (updated: typeof offers) => {
-        setOffers(updated);
-        localStorage.setItem("coinloot_offers", JSON.stringify(updated));
-      };
+const handleSaveOffers = (updated: typeof offers) => {
+  setOffers(updated);
+  localStorage.setItem("coinloot_offers", JSON.stringify(updated));
+  AdminDb.saveOffers(updated).catch(() => {});
+};
       const toggleOfferStatus = (id: string) => {
         const o = offers.find((x) => x.id === id);
         if (!o) return;
         const newStatus = o.status === "active" ? "inactive" : o.status === "inactive" ? "locked" : "active";
-        saveOffers(offers.map((x) => x.id === id ? { ...x, status: newStatus } : x));
+        handleSaveOffers(offers.map((x) => x.id === id ? { ...x, status: newStatus } : x));
         showNotif("success", `Offer ${newStatus}`);
         addLog("OFFER_STATUS", "offer", id, `Set offer ${o.title} to ${newStatus}`);
       };
       const handleDeleteOffer = (id: string) => {
         const o = offers.find((x) => x.id === id);
         if (!o || !confirm(`Delete offer "${o.title}"?`)) return;
-        saveOffers(offers.filter((x) => x.id !== id));
+        handleSaveOffers(offers.filter((x) => x.id !== id));
         showNotif("success", "Offer deleted");
         addLog("OFFER_DELETED", "offer", id, `Deleted offer ${o.title}`);
       };
@@ -2325,7 +2290,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         if (o) { setEditingOfferId(id); setEditingOfferTitle(o.title); }
       };
       const saveEditOffer = (id: string) => {
-        saveOffers(offers.map((x) => x.id === id ? { ...x, title: editingOfferTitle } : x));
+        handleSaveOffers(offers.map((x) => x.id === id ? { ...x, title: editingOfferTitle } : x));
         setEditingOfferId(null);
         showNotif("success", "Offer updated");
         addLog("OFFER_UPDATED", "offer", id, `Updated offer title`);
@@ -2333,7 +2298,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const handleAddOffer = () => {
         if (!newOffer.title) return showNotif("error", "Offer title required");
         const id = `of-${Date.now()}`;
-        saveOffers([...offers, { id, title: newOffer.title, provider: newOffer.provider, payout: newOffer.payout, status: "active", difficulty: newOffer.difficulty }]);
+        handleSaveOffers([...offers, { id, title: newOffer.title, provider: newOffer.provider, payout: newOffer.payout, status: "active", difficulty: newOffer.difficulty }]);
         setNewOffer({ title: "", provider: "Torox", payout: 100, difficulty: "Easy" });
         setShowAddOffer(false);
         showNotif("success", "Offer created");
@@ -2422,7 +2387,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const saveRules = (updated: typeof rules) => {
         setRules(updated);
         localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated));
-        saveLockRules(updated).catch(() => {});
+        AdminDb.saveLockRules(updated).catch(() => {});
       };
       const addRule = () => {
         if (!newRule.name) return showNotif("error", "Rule name required");
@@ -3220,12 +3185,19 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         return `${m}m ${s}s`;
       };
 
-      const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
-        const updated = { ...vpnSettings, [key]: !vpnSettings[key] };
-        setVpnSettings(updated);
-        saveVpnSettings(updated);
-        showNotif("success", `VPN ${key === "vpnWarning" ? "Warning" : key === "offerwallBlock" ? "Offerwall Block" : "Withdrawal Block"} ${updated[key] ? "enabled" : "disabled"}`);
-      };
+const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
+  const updated = { ...vpnSettings, [key]: !vpnSettings[key] };
+  setVpnSettings(updated);
+  saveVpnSettings(updated);
+  AdminDb.saveVpnSettingsDb({
+    vpnDetection: true,
+    vpnWarning: updated.vpnWarning,
+    vpnBlock: updated.offerwallBlock,
+    withdrawalBlock: updated.withdrawalBlock,
+    restrictDuration: 30,
+  }).catch(() => {});
+  showNotif("success", `VPN ${key === "vpnWarning" ? "Warning" : key === "offerwallBlock" ? "Offerwall Block" : "Withdrawal Block"} ${updated[key] ? "enabled" : "disabled"}`);
+};
 
       return (
         <div className="p-4 lg:p-6 space-y-4">
@@ -3377,7 +3349,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         const updated = { ...homepageSections, [key]: !homepageSections[key] };
         setHomepageSections(updated);
         localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
-        saveHomepageSections(updated).catch(() => {});
+        AdminDb.saveHomepageSections(updated).catch(() => {});
         window.dispatchEvent(new CustomEvent("homepage-sections-changed"));
         showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
       };
@@ -3512,303 +3484,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               </button>
             </div>
           </div>
-          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
-            <h3 className="font-bold text-sm text-white flex items-center gap-2"><Server className="w-4 h-4 text-emerald-400" /> Database Connection</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Project Name</label><input value={dbProjectName} onChange={(e) => setDbProjectName(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="My Supabase Project" /></div>
-              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Project ID</label><input value={dbProjectId} onChange={(e) => setDbProjectId(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="abcdefghijklm" /></div>
-              <div className="sm:col-span-2"><label className="text-[9px] text-slate-500 uppercase block mb-1">Project URL</label><input value={dbProjectUrl} onChange={(e) => setDbProjectUrl(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="https://your-project.supabase.co" /></div>
-              <div className="sm:col-span-2"><label className="text-[9px] text-slate-500 uppercase block mb-1">API Key <span className="text-slate-600">(anon/public)</span></label>
-                <div className="relative">
-                  <input type={dbKeyVisible ? "text" : "password"} value={dbApiKey} onChange={(e) => setDbApiKey(e.target.value)} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white pr-8" placeholder="eyJhbGciOiJIUzI1NiIs..." />
-                  <button onClick={() => setDbKeyVisible(!dbKeyVisible)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-all cursor-pointer">
-                    {dbKeyVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={testDbConnection} disabled={dbTesting || !dbProjectUrl || !dbApiKey} className="py-2 px-4 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
-                {dbTesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wifi className="w-3 h-3" />}
-                {dbTesting ? "Testing..." : "Test Connection"}
-              </button>
-              {dbTestResult && (
-                <span className={`text-[10px] font-mono ${dbTestResult.ok ? "text-emerald-400" : "text-rose-400"}`}>
-                  {dbTestResult.ok ? "✅ " : "❌ "}{dbTestResult.msg}
-                </span>
-              )}
-            </div>
-          </div>
 
-          {/* ── SQL Setup ── */}
-          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3">
-            <h3 className="font-bold text-sm text-white flex items-center gap-2"><FileText className="w-4 h-4 text-violet-400" /> Database Setup SQL</h3>
-            <p className="text-[10px] text-slate-400 font-mono">Copy and run this SQL in your Supabase SQL Editor to create all required tables.</p>
-            <div className="relative" id="db-setup-sql">
-              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-96 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
-{`-- CoinLoot Database Tables
--- Safe to re-run — uses IF NOT EXISTS / DROP IF EXISTS
--- Run this in your Supabase SQL Editor
-
--- Drop existing policies first (safe re-run)
-DO $$ BEGIN
-  DROP POLICY IF EXISTS "Users can view own profile" ON users;
-  DROP POLICY IF EXISTS "Admins can read all users" ON users;
-  DROP POLICY IF EXISTS "Users can update own profile" ON users;
-  DROP POLICY IF EXISTS "Admins can read vpn_detection_logs" ON vpn_detection_logs;
-EXCEPTION WHEN undefined_table THEN NULL;
-END $$;
-
--- Enable RLS on tables (safe, IF EXISTS)
-ALTER TABLE IF EXISTS vpn_detection_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS users ENABLE ROW LEVEL SECURITY;
-
--- Recreate policies (wrapped in DO blocks to safely handle "already exists")
-DO $$ BEGIN
-  CREATE POLICY IF NOT EXISTS "Users can view own profile"
-    ON users FOR SELECT
-    USING (auth.uid()::text = id OR (SELECT is_admin FROM users WHERE id = auth.uid()::text) = true);
-EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-  CREATE POLICY IF NOT EXISTS "Admins can read all users"
-    ON users FOR SELECT
-    USING (true);
-EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-  CREATE POLICY IF NOT EXISTS "Users can update own profile"
-    ON users FOR UPDATE
-    USING (auth.uid()::text = id);
-EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-  CREATE POLICY IF NOT EXISTS "Admins can read vpn_detection_logs"
-    ON vpn_detection_logs FOR SELECT
-    USING (true);
-EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
-END $$;
-
--- Users table
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  email TEXT,
-  username TEXT,
-  password TEXT,
-  referral_code TEXT,
-  referred_by TEXT,
-  country TEXT DEFAULT 'BD',
-  avatar TEXT,
-  total_earned_coins BIGINT DEFAULT 0,
-  total_withdrawn_coins BIGINT DEFAULT 0,
-  kyc_status TEXT DEFAULT 'NOT_STARTED',
-  is_banned BOOLEAN DEFAULT FALSE,
-  referrals_count INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Withdrawals table
-CREATE TABLE IF NOT EXISTS withdrawals (
-  id TEXT PRIMARY KEY,
-  user_id TEXT REFERENCES users(id),
-  coins_deducted BIGINT DEFAULT 0,
-  usd_value DECIMAL DEFAULT 0,
-  payout_method TEXT,
-  payout_address TEXT,
-  status TEXT DEFAULT 'PENDING',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Withdrawal methods config
-CREATE TABLE IF NOT EXISTS withdrawal_methods (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  icon TEXT,
-  min_coins BIGINT DEFAULT 0,
-  max_coins BIGINT DEFAULT 0,
-  fee_percent DECIMAL DEFAULT 0,
-  status TEXT DEFAULT 'active'
-);
-
--- Offerwall providers
-CREATE TABLE IF NOT EXISTS offerwall_providers (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  slug TEXT,
-  category TEXT,
-  color TEXT,
-  connected BOOLEAN DEFAULT TRUE
-);
-
--- Offers
-CREATE TABLE IF NOT EXISTS offers (
-  id TEXT PRIMARY KEY,
-  provider_id TEXT,
-  name TEXT,
-  payout BIGINT DEFAULT 0,
-  status TEXT DEFAULT 'active',
-  image_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Promo codes
-CREATE TABLE IF NOT EXISTS promo_codes (
-  code TEXT PRIMARY KEY,
-  coins BIGINT DEFAULT 0,
-  max_uses INT DEFAULT 100,
-  used_count INT DEFAULT 0,
-  expires_at TIMESTAMPTZ
-);
-
--- Promo claims
-CREATE TABLE IF NOT EXISTS promo_claims (
-  user_id TEXT,
-  promo_code TEXT,
-  claimed_at TIMESTAMPTZ DEFAULT NOW(),
-  PRIMARY KEY (user_id, promo_code)
-);
-
--- Support tickets
-CREATE TABLE IF NOT EXISTS support_tickets (
-  id TEXT PRIMARY KEY,
-  user_id TEXT REFERENCES users(id),
-  subject TEXT,
-  message TEXT,
-  status TEXT DEFAULT 'open',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Admin logs
-CREATE TABLE IF NOT EXISTS admin_logs (
-  id TEXT PRIMARY KEY,
-  action TEXT,
-  category TEXT,
-  target_id TEXT,
-  description TEXT,
-  timestamp TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Admin notifications
-CREATE TABLE IF NOT EXISTS admin_notifications (
-  id TEXT PRIMARY KEY,
-  type TEXT,
-  title TEXT,
-  message TEXT,
-  status TEXT DEFAULT 'unread',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- KYC records
-CREATE TABLE IF NOT EXISTS kyc_records (
-  user_id TEXT PRIMARY KEY REFERENCES users(id),
-  doc_type TEXT,
-  front_image TEXT,
-  back_image TEXT,
-  selfie_image TEXT,
-  status TEXT DEFAULT 'PENDING',
-  submitted_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- User IP Logs (VPN/Proxy detection records)
-CREATE TABLE IF NOT EXISTS user_ip_logs (
-  id TEXT PRIMARY KEY,
-  user_id TEXT,
-  ip_address TEXT,
-  country TEXT,
-  city TEXT,
-  isp TEXT,
-  proxy_detected BOOLEAN DEFAULT FALSE,
-  proxy_type TEXT,
-  risk_score INT DEFAULT 0,
-  last_seen TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Site settings
-CREATE TABLE IF NOT EXISTS site_settings (
-  key TEXT PRIMARY KEY,
-  value JSONB
-);
-
--- Rewards & Challenges configuration
-CREATE TABLE IF NOT EXISTS reward_configs (
-  key TEXT PRIMARY KEY,
-  value JSONB NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);`}</pre>
-              <button onClick={() => { navigator.clipboard.writeText(document.querySelector("#db-setup-sql pre")?.textContent || ""); showNotif("success", "SQL copied to clipboard!"); }} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all cursor-pointer" title="Copy SQL">
-                <Copy className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          {/* ── Query SQL (Read Data) ── */}
-          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3">
-            <h3 className="font-bold text-sm text-white flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-400" /> Query SQL — Read All Data</h3>
-            <p className="text-[10px] text-slate-400 font-mono">Copy and run these SELECT queries in your Supabase SQL Editor to browse data.</p>
-            <div className="relative" id="db-query-sql">
-              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-80 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
-{`-- ============================================
--- CoinLoot Data Viewer Queries
--- Run any of these in Supabase SQL Editor
--- ============================================
-
--- 1. All Users
-SELECT * FROM users ORDER BY created_at DESC;
-
--- 2. All Withdrawals
-SELECT * FROM withdrawals ORDER BY created_at DESC;
-
--- 3. All Offerwall Providers
-SELECT * FROM offerwall_providers;
-
--- 4. All Offers
-SELECT * FROM offers ORDER BY created_at DESC;
-
--- 5. All Promo Codes
-SELECT * FROM promo_codes;
-
--- 6. All Support Tickets
-SELECT * FROM support_tickets ORDER BY created_at DESC;
-
--- 7. All KYC Records
-SELECT * FROM kyc_records;
-
--- 8. All Admin Logs
-SELECT * FROM admin_logs ORDER BY timestamp DESC;
-
--- 9. All Admin Notifications
-SELECT * FROM admin_notifications ORDER BY created_at DESC;
-
--- 10. All Withdrawal Methods
-SELECT * FROM withdrawal_methods;
-
--- 11. Site Settings
-SELECT * FROM site_settings;
-
--- 12. Users with KYC (joined)
-SELECT u.id, u.username, u.email, u.kyc_status, k.doc_type, k.status as kyc_doc_status
-FROM users u
-LEFT JOIN kyc_records k ON u.id = k.user_id
-ORDER BY u.created_at DESC;
-
--- 13. Dashboard Summary
-SELECT
-  (SELECT COUNT(*) FROM users) as total_users,
-  (SELECT COUNT(*) FROM withdrawals) as total_withdrawals,
-  (SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING') as pending_withdrawals,
-  (SELECT COUNT(*) FROM support_tickets WHERE status = 'open') as open_tickets,
-  (SELECT COUNT(*) FROM kyc_records WHERE status = 'PENDING') as pending_kyc,
-  COALESCE((SELECT SUM(total_earned_coins) FROM users), 0) as total_coins_earned,
-  COALESCE((SELECT SUM(usd_value) FROM withdrawals WHERE status IN ('APPROVED','PAID')), 0) as total_withdrawn_usd;`}</pre>
-              <button onClick={() => { navigator.clipboard.writeText(document.querySelector("#db-query-sql pre")?.textContent || ""); showNotif("success", "Query SQL copied!"); }} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all cursor-pointer" title="Copy SQL">
-                <Copy className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
 
           {/* ── Data Browser (inline) ── */}
           <DataBrowserCard />

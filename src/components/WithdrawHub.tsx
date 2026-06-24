@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Building2, CreditCard, DollarSign, Wallet, ShieldAlert, ArrowRight, CheckCircle,
   History, Clock, AlertTriangle, AlertCircle, Sparkles, Send, Copy, Coins, Zap
@@ -8,6 +8,7 @@ import { isDeveloperMode } from "./DeveloperModeBanner";
 import { notifyWithdrawalRequest } from "../utils/adminNotifier";
 import { checkVpnStatus, getVpnSettings, isUserRestricted, restrictUser, logDetection } from "../utils/vpnDetector";
 import { calcLevelFromBalance } from "../utils/levelSystem";
+import { getWithdrawalMethods } from "../lib/supabaseService";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -40,101 +41,6 @@ interface ValidationError {
   message: string;
 }
 
-// ─── Payment methods ────────────────────────────────────────────────────────
-
-const PAYMENT_METHODS: WithdrawMethod[] = [
-  {
-    id: "paypal",
-    name: "PayPal",
-    icon: "💎",
-    minCoins: 1000,
-    type: "PayPal Account Email",
-    fieldLabel: "PayPal Email Address",
-    placeholder: "e.g. user@example.com",
-    description: "Instant cashouts to your PayPal account. Funds available immediately."
-  },
-  {
-    id: "binance",
-    name: "Binance Pay",
-    icon: "🌐",
-    minCoins: 1000,
-    type: "Binance ID / Email",
-    fieldLabel: "Binance Email or Pay ID",
-    placeholder: "e.g. binance@example.com or 283192038",
-    description: "Near-instant zero-fee transfer using Binance Pay credentials."
-  },
-  {
-    id: "usdt",
-    name: "USDT (TRC-20)",
-    icon: "₮",
-    minCoins: 2000,
-    type: "USDT TRC-20 Address",
-    fieldLabel: "USDT Wallet Address (TRC-20)",
-    placeholder: "e.g. TXy12938481A...",
-    description: "Stablecoin payout on the Tron network. Low fees, fast settlement."
-  },
-  {
-    id: "litecoin",
-    name: "Litecoin",
-    icon: "Ł",
-    minCoins: 2000,
-    type: "LTC Address",
-    fieldLabel: "Litecoin Wallet Address",
-    placeholder: "e.g. LTC1q2...",
-    description: "Litecoin (LTC) direct to your wallet. Fast and inexpensive."
-  },
-  {
-    id: "bitcoin",
-    name: "Bitcoin",
-    icon: "₿",
-    minCoins: 5000,
-    type: "BTC Address",
-    fieldLabel: "Bitcoin Wallet Address",
-    placeholder: "e.g. bc1q...",
-    description: "Bitcoin (BTC) sent directly to your wallet address."
-  },
-  {
-    id: "ethereum",
-    name: "Ethereum",
-    icon: "♦",
-    minCoins: 5000,
-    type: "ETH Address",
-    fieldLabel: "Ethereum Wallet Address",
-    placeholder: "e.g. 0x...",
-    description: "Ethereum (ETH) direct transfer. ERC-20 compatible."
-  },
-  {
-    id: "giftcard",
-    name: "Gift Cards",
-    icon: "🎁",
-    minCoins: 1000,
-    type: "Recipient Email",
-    fieldLabel: "Recipient Email Address",
-    placeholder: "e.g. giftbox@email.com",
-    description: "Digital gift card delivered via email. Multiple brands available."
-  },
-  {
-    id: "skrill",
-    name: "Skrill",
-    icon: "🏦",
-    minCoins: 5000,
-    type: "Skrill Account Email",
-    fieldLabel: "Skrill Account Email",
-    placeholder: "e.g. skrill@example.com",
-    description: "Fast wire payments processed in 15+ fiat currencies."
-  },
-  {
-    id: "payeer",
-    name: "Payeer",
-    icon: "💳",
-    minCoins: 2000,
-    type: "Payeer Account ID",
-    fieldLabel: "Payeer Account ID",
-    placeholder: "e.g. P1002938129",
-    description: "Secure gateway for Payeer account holders worldwide."
-  },
-];
-
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 function coinsToUsd(coins: number): number {
@@ -157,10 +63,16 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [vpnBlocked, setVpnBlocked] = useState(false);
   const [vpnChecking, setVpnChecking] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
 
   // ── Derived values ──
   const usdValue = coinsToUsd(amountCoins);
   const myWithdrawalRequests = withdrawals.filter((w) => w.user_id === user.id);
+
+  // ── Fetch payment methods ──
+  useEffect(() => {
+    getWithdrawalMethods().then(setPaymentMethods).catch(() => setPaymentMethods([]));
+  }, []);
 
   // ── Validation ──
   const validate = (): ValidationError[] => {
@@ -338,7 +250,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
         {/* ── Payment Methods Grid (2 cols) ── */}
         <div className="lg:col-span-2 space-y-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {PAYMENT_METHODS.map((method) => {
+            {paymentMethods.map((method) => {
               const isSelected = selectedMethod?.id === method.id;
               return (
                 <button
@@ -395,7 +307,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
                     <div className="flex items-center gap-3 min-w-0">
                       {/* Method icon */}
                       <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/5 flex items-center justify-center text-base shrink-0">
-                        {PAYMENT_METHODS.find(m => m.id === item.payout_method)?.icon || "💳"}
+                        {paymentMethods.find(m => m.id === item.payout_method)?.icon || "💳"}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -615,7 +527,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
               </div>
               <h3 className="text-sm font-bold text-white">Select a Payment Method</h3>
               <p className="text-slate-400 text-xs leading-relaxed">
-                Choose from {PAYMENT_METHODS.length} payout methods above. Enter the amount and your wallet details to withdraw.
+                Choose from {paymentMethods.length} payout methods above. Enter the amount and your wallet details to withdraw.
               </p>
               <div className="flex flex-wrap justify-center gap-2 text-[10px] text-slate-500 font-mono">
                 <span className="px-2 py-1 rounded-lg bg-white/5">Min: 1,000 coins</span>

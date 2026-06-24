@@ -570,3 +570,17 @@ export async function getAllSiteSettings() {
   const { data } = await sb.from("site_settings").select("*");
   return data || [];
 }
+
+// ─── Withdrawal Methods ────────────────────────────────────────────────────────
+
+export async function getWithdrawalMethods(): Promise<any[]> {
+  const sb = getSupabaseClient();
+  if (!sb) return [];
+
+  const { data } = await sb
+    .from("withdrawal_methods")
+    .select("*")
+    .order("sort_order");
+
+  return data || [];
+}

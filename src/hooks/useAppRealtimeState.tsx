@@ -6,7 +6,7 @@ import {
   GlobalPromoNotification, LockRule, RewardsConfig,
   getHomepageSections, getDeveloperMode, getMaintenanceMode,
   getGlobalPromoNotification, getLockRules, getRewardsConfig,
-  getSystemNotifications,
+  getSystemNotifications, getOffers, getPromoCodes,
   VpnSettings, getVpnSettingsDb,
   SocialBountyConfig, WeeklyChallengeConfig,
   defaultSocialBounty, defaultWeeklyChallenge,
@@ -25,6 +25,8 @@ export interface AppRealtimeState {
   weeklyChallenge: WeeklyChallengeConfig;
   vpnSettings: VpnSettings;
   systemNotifications: any[];
+  offers: any[];
+  promoCodes: any[];
   loading: boolean;
 }
 
@@ -37,8 +39,10 @@ const defaultState: AppRealtimeState = {
   rewardsConfig: { socialBounty: defaultSocialBounty(), weeklyChallenge: defaultWeeklyChallenge() },
   socialBounty: defaultSocialBounty(),
   weeklyChallenge: defaultWeeklyChallenge(),
-  vpnSettings: { vpnDetection: true, vpnWarning: true, vpnBlock: true, restrictDuration: 30 },
+  vpnSettings: { vpnDetection: true, vpnWarning: true, vpnBlock: true, withdrawalBlock: true, restrictDuration: 30 },
   systemNotifications: [],
+  offers: [],
+  promoCodes: [],
   loading: true,
 };
 
@@ -59,7 +63,7 @@ export function useAppRealtimeState() {
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 async function loadAllState(): Promise<AppRealtimeState> {
-  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications] =
+  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications, offers, promoCodes] =
     await Promise.all([
       getHomepageSections(),
       getDeveloperMode(),
@@ -69,6 +73,8 @@ async function loadAllState(): Promise<AppRealtimeState> {
       getRewardsConfig(),
       getVpnSettingsDb(),
       getSystemNotifications().catch(() => []),
+      getOffers(),
+      getPromoCodes(),
     ]);
 
   return {
@@ -82,6 +88,8 @@ async function loadAllState(): Promise<AppRealtimeState> {
     weeklyChallenge: rewardsConfig.weeklyChallenge,
     vpnSettings,
     systemNotifications,
+    offers,
+    promoCodes,
     loading: false,
   };
 }
@@ -120,7 +128,7 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
           const relevantKeys = [
             "homepage_sections", "developer_mode", "maintenance_mode",
             "global_promo_notification", "lock_rules", "rewards_config",
-            "vpn_settings",
+            "vpn_settings", "offers", "promo_codes",
           ];
 
           if (!relevantKeys.includes(key)) return;
