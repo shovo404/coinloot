@@ -38,40 +38,40 @@ function SinglePopup({ popup, onDismiss }: { popup: RewardPopupData; onDismiss: 
 
   return (
     <div
-      className={`relative w-full max-w-[calc(100vw-2rem)] sm:max-w-sm glass border border-white/10 rounded-2xl p-4 shadow-2xl group transition-all duration-[400ms] ${
+      className={`relative w-full max-w-[calc(100vw-2rem)] sm:max-w-sm glass border border-white/10 rounded-2xl p-3 sm:p-4 shadow-2xl group transition-all duration-[400ms] ${
         isFadingOut ? "animate-reward-popup-out" : "animate-reward-popup-in"
       }`}
       role="alert"
     >
       <button
         onClick={onDismiss}
-        className="absolute top-2 right-2 p-0.5 rounded-full text-slate-500 hover:text-white hover:bg-white/5 transition-all opacity-0 group-hover:opacity-100"
+        className="absolute top-1.5 right-1.5 p-0.5 rounded-full text-slate-500 hover:text-white hover:bg-white/5 transition-all opacity-0 group-hover:opacity-100"
         aria-label="Dismiss"
       >
         <X className="w-3 h-3" />
       </button>
 
-      <div className="flex items-center gap-3.5">
+      <div className="flex items-center gap-2.5 sm:gap-3.5">
         <div
-          className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${provider.color} border ${provider.border} flex items-center justify-center shadow-lg shrink-0`}
+          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-br ${provider.color} border ${provider.border} flex items-center justify-center shadow-lg shrink-0`}
         >
-          <span className="text-white font-bold text-sm">{provider.initials}</span>
+          <span className="text-white font-bold text-[10px] sm:text-sm">{provider.initials}</span>
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-xs font-semibold text-white truncate">
+          <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5">
+            <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
               {popup.sourceName}
             </span>
-            <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 font-bold text-[10px] font-mono whitespace-nowrap">
+            <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 font-bold text-[9px] sm:text-[10px] font-mono whitespace-nowrap">
               +{popup.coins.toLocaleString()}
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 leading-snug">{popup.message}</p>
+          <p className="text-[10px] sm:text-[11px] text-slate-400 leading-snug line-clamp-2">{popup.message}</p>
 
-          <div className="flex items-center gap-1 mt-1.5">
-            <Coins className="w-3 h-3 text-amber-400 animate-pulse" />
-            <span className="text-[9px] font-mono text-amber-400/70">
+          <div className="flex items-center gap-1 mt-1">
+            <Coins className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400 animate-pulse" />
+            <span className="text-[8px] sm:text-[9px] font-mono text-amber-400/70">
               {popup.coins.toLocaleString()} coins credited
             </span>
           </div>
