@@ -523,7 +523,7 @@ app.post("/api/offerwall/fetch", async (req, res) => {
       payout_coins: payout,
       category: cat,
       provider: name,
-      imageUrl: `https://logo.clearbit.com/${domain}`,
+      imageUrl: `/logos/${domain?.split('.')[0] || 'default'}.png`,
       difficulty: diff,
       link: `https://${domain}?userId=${req.body.userId || "guest"}`,
     };

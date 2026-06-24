@@ -1,21 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus } from "lucide-react";
 import { UserProfile } from "../types";
-import { notifyRegistration } from "../utils/adminNotifier";
-import { sendTelegramNotification } from "../utils/telegramNotify";
+import { signUp, signIn, getProfile } from "../lib/supabaseService";
 import { getSupabaseClient } from "../lib/supabase";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin: (profile: UserProfile) => void;
-}
-
-interface StoredAccount {
-  email: string;
-  password: string;
-  username: string;
-  profile: UserProfile;
 }
 
 export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) {
@@ -28,92 +20,27 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const modalRef = useRef<HTMLDivElement>(null);
+  const initialLoadRef = useRef(true);
 
-  // Load accounts from localStorage (with default admin seeded)
-  const getAccounts = (): StoredAccount[] => {
-    try {
-      const raw = localStorage.getItem("coinloot_accounts");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        // Ensure admin account exists and has correct role
-        const adminIdx = parsed.findIndex((a: StoredAccount) => a.email === "coinlootadmin@gmail.com");
-        if (adminIdx >= 0) {
-          // Migrate any stale admin role (e.g. SUPER_ADMIN) to current ADMIN
-          const stored = parsed[adminIdx];
-          if (stored.profile.is_admin && stored.profile.admin_role && stored.profile.admin_role !== 'ADMIN') {
-            stored.profile.admin_role = 'ADMIN';
-            parsed[adminIdx] = stored;
-            localStorage.setItem("coinloot_accounts", JSON.stringify(parsed));
-          }
-        } else {
-          // Admin account missing — reseed it
-          const adminProfile: UserProfile = {
-            id: `u-admin-${Math.random().toString(36).substring(2, 10)}`,
-            username: "SuperAdmin",
-            email: "coinlootadmin@gmail.com",
-            balance_coins: 0,
-            balance_usd: 0.00,
-            xp: 0,
-            level: 1,
-            streak_days: 0,
-            referred_by: null,
-            referrals_count: 0,
-            total_earned_coins: 0,
-            total_withdrawn_usd: 0,
-            kyc_status: "APPROVED",
-            kyc_required: false,
-            is_admin: true,
-            admin_role: "ADMIN",
-            vpn_detected: false,
-            device_fingerprint: `ADMIN-GPU-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-          };
-          parsed.push({
-            email: "coinlootadmin@gmail.com",
-            password: "Coinloot@#admin@#",
-            username: "SuperAdmin",
-            profile: adminProfile,
-          });
-          localStorage.setItem("coinloot_accounts", JSON.stringify(parsed));
+  // Attempt to restore session on mount
+  useEffect(() => {
+    if (!isOpen || !initialLoadRef.current) return;
+    initialLoadRef.current = false;
+
+    const restoreSession = async () => {
+      const sb = getSupabaseClient();
+      if (!sb) return;
+      const { data: { session } } = await sb.auth.getSession();
+      if (session?.user) {
+        const profile = await getProfile(session.user.id);
+        if (profile) {
+          onLogin(profile);
+          onClose();
         }
-        return parsed;
-      }          // First run — create admin account
-      const adminProfile: UserProfile = {
-        id: `u-admin-${Math.random().toString(36).substring(2, 10)}`,
-        username: "SuperAdmin",
-        email: "coinlootadmin@gmail.com",
-        balance_coins: 0,
-        balance_usd: 0.00,
-        xp: 0,
-        level: 1,
-        streak_days: 0,
-        referred_by: null,
-        referrals_count: 0,
-        total_earned_coins: 0,
-        total_withdrawn_usd: 0,
-        kyc_status: "APPROVED",
-        kyc_required: false,
-        is_admin: true,
-        admin_role: "ADMIN",
-        vpn_detected: false,
-        device_fingerprint: `ADMIN-GPU-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-      };
-      const initialAccounts = [{
-        email: "coinlootadmin@gmail.com",
-        password: "Coinloot@#admin@#",
-        username: "SuperAdmin",
-        profile: adminProfile,
-      }];
-      localStorage.setItem("coinloot_accounts", JSON.stringify(initialAccounts));
-      return initialAccounts;
-    } catch {
-      return [];
-    }
-  };
-
-  // Save accounts to localStorage
-  const saveAccounts = (accounts: StoredAccount[]) => {
-    localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
-  };
+      }
+    };
+    restoreSession();
+  }, [isOpen, onLogin, onClose]);
 
   // Reset form on close/tab switch
   useEffect(() => {
@@ -148,19 +75,35 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     setError("");
     setLoading(true);
 
-    // Simulate network delay
-    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const trimmedEmail = email.trim().toLowerCase();
+      if (!trimmedEmail || !password) {
+        setError("Email and password are required.");
+        setLoading(false);
+        return;
+      }
 
-    const accounts = getAccounts();
-    const account = accounts.find(
-      (a) => a.email === email.trim().toLowerCase() && a.password === password
-    );
-
-    if (account) {
-      onLogin(account.profile);
-      onClose();
-    } else {
-      setError("Invalid email or password. Please try again.");
+      const data = await signIn(trimmedEmail, password);
+      if (data.user) {
+        const profile = await getProfile(data.user.id);
+        if (profile) {
+          onLogin(profile);
+          onClose();
+        } else {
+          setError("Account not found. Please contact support.");
+        }
+      }
+    } catch (err: any) {
+      const msg = err?.message || "";
+      if (msg.includes("Invalid login credentials")) {
+        setError("Invalid email or password. Please try again.");
+      } else if (msg.includes("Email not confirmed")) {
+        setError("Please verify your email address before signing in.");
+      } else if (msg.toLowerCase().includes("rate limit")) {
+        setError("Too many sign-in attempts. Please wait a moment.");
+      } else {
+        setError(msg || "Sign in failed. Please try again.");
+      }
     }
 
     setLoading(false);
@@ -191,113 +134,44 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
 
     setLoading(true);
 
-    // Simulate network delay
-    await new Promise((r) => setTimeout(r, 600));
-
-    const accounts = getAccounts();
-
-    // Check if email already exists
-    if (accounts.some((a) => a.email === trimmedEmail)) {
-      setError("An account with this email already exists.");
-      setLoading(false);
-      return;
-    }
-
-    // Check if username already exists
-    if (accounts.some((a) => a.username.toLowerCase() === trimmedUsername.toLowerCase())) {
-      setError("This username is already taken.");
-      setLoading(false);
-      return;
-    }
-
-    // Create new profile
-    let regIp = "";
     try {
-      const ipRes = await fetch("https://api.ipify.org?format=json");
-      const ipData = await ipRes.json();
-      regIp = ipData.ip || "";
-    } catch { /* */ }
+      await signUp(trimmedEmail, password, trimmedUsername);
 
-    // Check IP account limit
-    const ipLimitSettings = JSON.parse(localStorage.getItem("coinloot_ip_limit_settings") || '{"enabled":false,"maxAccounts":3}');
-    if (ipLimitSettings.enabled && regIp) {
-      const allProfiles: UserProfile[] = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
-      const accountsWithSameIp = allProfiles.filter(p => p.registration_ip === regIp).length;
-      if (accountsWithSameIp >= ipLimitSettings.maxAccounts) {
-        setError(`Maximum ${ipLimitSettings.maxAccounts} accounts allowed per IP address. You already have ${accountsWithSameIp} account(s).`);
+      // Try auto sign-in after registration
+      try {
+        const data = await signIn(trimmedEmail, password);
+        if (data.user) {
+          const profile = await getProfile(data.user.id);
+          if (profile) {
+            setSuccessMsg("Account created successfully! Signing you in...");
+            setTimeout(() => {
+              onLogin(profile);
+              onClose();
+            }, 800);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Auto sign-in may fail if email confirmation is required
+        setSuccessMsg("Account created! Please check your email to verify your account before signing in.");
         setLoading(false);
         return;
       }
-    }
-
-    const newProfile: UserProfile = {
-      id: `u-${Math.random().toString(36).substring(2, 10)}`,
-      username: trimmedUsername,
-      email: trimmedEmail,
-      balance_coins: 0,
-      balance_usd: 0.00,
-      xp: 0,
-      level: 1,
-      streak_days: 0,
-      referred_by: null,
-      referrals_count: 0,
-      total_earned_coins: 0,
-      total_withdrawn_usd: 0,
-      kyc_status: "NOT_STARTED",
-      kyc_required: false,
-      registration_ip: regIp,
-      is_admin: false,
-      vpn_detected: false,
-      device_fingerprint: `GPU-WEBGL-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-    };
-
-    const newAccount: StoredAccount = {
-      email: trimmedEmail,
-      password,
-      username: trimmedUsername,
-      profile: newProfile,
-    };
-
-    saveAccounts([...accounts, newAccount]);
-
-    // Also save to coinloot_user_profiles for KYC/admin panel sync
-    const existingProfiles = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
-    existingProfiles.push(newProfile);
-    localStorage.setItem("coinloot_user_profiles", JSON.stringify(existingProfiles));
-
-    // Save to Supabase profiles table if configured
-    try {
-      const sb = getSupabaseClient();
-      if (sb) {
-        sb.from("profiles").insert({
-          id: newProfile.id,
-          username: newProfile.username,
-          email: newProfile.email,
-          full_name: newProfile.username,
-          country: newProfile.country || "",
-          avatar_url: "",
-          balance_coins: 0,
-          level: 1,
-          total_earned_coins: 0,
-          kyc_status: "NOT_STARTED",
-          created_at: new Date().toISOString(),
-        }).then(({ error }) => {
-          if (error) console.warn("Supabase profile insert failed:", error.message);
-        });
+    } catch (err: any) {
+      const msg = err?.message || "";
+      if (msg.includes("already registered") || msg.includes("already exists")) {
+        setError("An account with this email already exists.");
+      } else if (msg.includes("duplicate key") && msg.includes("username")) {
+        setError("This username is already taken.");
+      } else if (msg.includes("duplicate key") && msg.includes("email")) {
+        setError("An account with this email already exists.");
+      } else if (msg.toLowerCase().includes("rate limit")) {
+        setError("Too many signup attempts. Please wait a minute before trying again.");
+      } else {
+        setError(msg || "Registration failed. Please try again.");
       }
-    } catch (e) {
-      console.warn("Supabase not available, skipping profile insert");
     }
-
-    window.dispatchEvent(new CustomEvent("user-registered"));
-
-    notifyRegistration(newProfile.id, trimmedUsername, trimmedEmail, "", password);
-
-    setSuccessMsg("Account created successfully! Signing you in...");
-    setTimeout(() => {
-      onLogin(newProfile);
-      onClose();
-    }, 800);
 
     setLoading(false);
   };

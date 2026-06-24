@@ -6,6 +6,7 @@ import { getProviderInfo, getProviderLogoUrl } from "../utils/providerLogos";
 import PromoUnlockModal from "./PromoUnlockModal";
 
 interface Props {
+  key?: string;
   config: LockedOfferwallConfig;
   user: UserProfile;
   onUnlocked: (providerName: string) => void;

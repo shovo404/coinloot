@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   LayoutDashboard, Users, DollarSign, ShieldAlert, CheckCircle, XCircle, Search,
   Settings, Coins, BarChart3, TrendingUp, TrendingDown, Trophy,
@@ -1670,26 +1670,26 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <div className="p-3 rounded-xl bg-rose-500/5 border border-rose-500/20 text-center">
-                  <span className="block text-lg font-bold text-rose-400">{bannedUsers.length}</span>
+                  <span className="block text-lg font-bold text-rose-400">{(() => { try { return JSON.parse(localStorage.getItem("coinloot_banned_users") || "[]").length; } catch { return 0; } })()}</span>
                   <span className="text-[8px] text-slate-400 font-mono">Banned Users</span>
                 </div>
                 <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-center">
-                  <span className="block text-lg font-bold text-amber-400">{restrictedUsers.length}</span>
+                  <span className="block text-lg font-bold text-amber-400">{getRestrictedUsers().length}</span>
                   <span className="text-[8px] text-slate-400 font-mono">Restricted Users</span>
                 </div>
                 <div className="p-3 rounded-xl bg-cyan-500/5 border border-cyan-500/20 text-center">
-                  <span className="block text-lg font-bold text-cyan-400">{flaggedUsers.length}</span>
+                  <span className="block text-lg font-bold text-cyan-400">{profiles.filter((p) => p.vpn_detected).length}</span>
                   <span className="text-[8px] text-slate-400 font-mono">VPN Flagged</span>
                 </div>
                 <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 text-center">
-                  <span className="block text-lg font-bold text-purple-400">{detectionHistory.length}</span>
+                  <span className="block text-lg font-bold text-purple-400">{getDetectionHistory().length}</span>
                   <span className="text-[8px] text-slate-400 font-mono">Detection Events</span>
                 </div>
               </div>
-              {(restrictedUsers.length > 0) && (
+              {(getRestrictedUsers().length > 0) && (
                 <div className="space-y-1.5 max-h-[180px] overflow-y-auto scrollbar-thin">
                   <span className="text-[8px] text-slate-500 font-mono font-semibold uppercase tracking-wider">Currently Restricted Users</span>
-                  {restrictedUsers.map((ru: any) => {
+                  {getRestrictedUsers().map((ru: any) => {
                     const profile = profiles.find((p: any) => p.id === ru.userId);
                     const remaining = ru.restrictedUntil ? Math.max(0, Math.floor((new Date(ru.restrictedUntil).getTime() - Date.now()) / 60000)) : 0;
                     return (

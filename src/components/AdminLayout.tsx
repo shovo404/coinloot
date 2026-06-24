@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   LayoutDashboard, Users, Zap, Wallet, DollarSign, Bell, Gift, Link2,
   BarChart3, ShieldAlert, Settings, LogOut, Search, ChevronDown, Lock,

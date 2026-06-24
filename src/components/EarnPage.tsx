@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   TrendingUp, DollarSign, Sparkles, ShieldCheck, Zap, Coins,
   Star, Lock, ArrowUpRight, Info,
@@ -779,7 +779,6 @@ function NotificationCards({ user, setUser, onRewardEarned }: { user: UserProfil
     setPromoEnabled(JSON.parse(localStorage.getItem("coinloot_global_notif_promo_enabled") || "false"));
     setPromoCode(localStorage.getItem("coinloot_global_notif_promo_code") || "");
     setPromoCoins(parseInt(localStorage.getItem("coinloot_global_notif_promo_coins") || "0"));
-    setPromoHours(parseInt(localStorage.getItem("coinloot_global_notif_promo_hours") || "24"));
     const list: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
     const code = localStorage.getItem("coinloot_global_notif_promo_code") || "";
     setClaimed(list.includes(code));

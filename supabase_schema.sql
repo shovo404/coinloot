@@ -16,6 +16,73 @@
 create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
 
+
+-- ════════════════════════════════════════════════════════════════════
+-- COMPREHENSIVE LEGACY CLEANUP — Drop ALL existing tables with CASCADE
+-- This ensures the schema is 100%% idempotent regardless of what
+-- was run before. All policies on these tables are removed too.
+
+drop table if exists public.achievement_rewards cascade;
+drop table if exists public.admin_accounts cascade;
+drop table if exists public.admin_activity_logs cascade;
+drop table if exists public.api_integrations cascade;
+drop table if exists public.coin_transactions cascade;
+drop table if exists public.daily_rewards cascade;
+drop table if exists public.earnings_history cascade;
+drop table if exists public.email_verifications cascade;
+drop table if exists public.fraud_detection_logs cascade;
+drop table if exists public.ip_logs cascade;
+drop table if exists public.leaderboard_statistics cascade;
+drop table if exists public.live_earnings cascade;
+drop table if exists public.locked_offerwalls cascade;
+drop table if exists public.login_history cascade;
+drop table if exists public.notification_settings cascade;
+drop table if exists public.notifications cascade;
+drop table if exists public.offer_unlock_rules cascade;
+drop table if exists public.offerwall_api_configs cascade;
+drop table if exists public.offerwall_providers cascade;
+drop table if exists public.offerwall_status_history cascade;
+drop table if exists public.offerwalls cascade;
+drop table if exists public.profiles cascade;
+drop table if exists public.promo_code_redemptions cascade;
+drop table if exists public.promo_codes cascade;
+drop table if exists public.referral_earnings cascade;
+drop table if exists public.referral_links cascade;
+drop table if exists public.restriction_history cascade;
+drop table if exists public.rewards cascade;
+drop table if exists public.security_logs cascade;
+drop table if exists public.site_settings cascade;
+drop table if exists public.support_tickets cascade;
+drop table if exists public.surveys cascade;
+drop table if exists public.system_notifications cascade;
+drop table if exists public.ticket_replies cascade;
+drop table if exists public.user_activity_logs cascade;
+drop table if exists public.user_balances cascade;
+drop table if exists public.user_levels cascade;
+drop table if exists public.user_restrictions cascade;
+drop table if exists public.vpn_detection_logs cascade;
+drop table if exists public.wallet_configurations cascade;
+drop table if exists public.withdrawal_methods cascade;
+drop table if exists public.withdrawals cascade;
+
+-- ════════════════════════════════════════════════════════════════════
+
+drop table if exists public.vpn_detection_logs cascade;
+drop table if exists public.user_restrictions cascade;
+drop table if exists public.restriction_history cascade;
+drop table if exists public.users cascade;
+drop table if exists public.user_ip_logs cascade;
+drop table if exists public.reward_configs cascade;
+drop table if exists public.kyc_documents cascade;
+drop table if exists public.admin_notifications cascade;
+drop table if exists public.admin_logs cascade;
+drop table if exists public._test_connection cascade;
+drop table if exists public.admin_users cascade;
+drop table if exists public.offers cascade;
+drop table if exists public.notifications_old cascade;
+drop table if exists public.referral_rewards cascade;
+drop table if exists public.email_verifications_old cascade;
+
 -- ════════════════════════════════════════════════════════════════════
 -- 1. USER SYSTEM
 -- ════════════════════════════════════════════════════════════════════
@@ -1167,325 +1234,357 @@ alter table public.site_settings enable row level security;
 alter table public.api_integrations enable row level security;
 
 -- ── Drop all policies first so they can be safely recreated ──
-do $$ begin
-  -- Profiles
-  drop policy if exists "Anyone can view profiles (public leaderboard)" on public.profiles;
-  drop policy if exists "Users can update own profile" on public.profiles;
-  drop policy if exists "Admins can manage all profiles" on public.profiles;
-  -- Coin Transactions
-  drop policy if exists "Users view own transactions" on public.coin_transactions;
-  drop policy if exists "Admins view all transactions" on public.coin_transactions;
-  -- Earnings History
-  drop policy if exists "Users view own earnings" on public.earnings_history;
-  drop policy if exists "Admins view all earnings" on public.earnings_history;
-  -- Live Earnings
-  drop policy if exists "Public read access on earnings feed" on public.live_earnings;
-  drop policy if exists "Authenticated users can log earnings" on public.live_earnings;
-  -- Notifications
-  drop policy if exists "Users view own notifications" on public.notifications;
-  drop policy if exists "Users update own notifications (mark read)" on public.notifications;
-  drop policy if exists "Users delete own notifications" on public.notifications;
-  drop policy if exists "System can insert notifications" on public.notifications;
-  -- Notification Settings
-  drop policy if exists "Users manage own notification settings" on public.notification_settings;
-  -- Withdrawals
-  drop policy if exists "Users view own withdrawals" on public.withdrawals;
-  drop policy if exists "Users create own withdrawals" on public.withdrawals;
-  drop policy if exists "Admins manage all withdrawals" on public.withdrawals;
-  -- Withdrawal Methods
-  drop policy if exists "Anyone can view active withdrawal methods" on public.withdrawal_methods;
-  drop policy if exists "Admins manage withdrawal methods" on public.withdrawal_methods;
-  -- Wallet Configurations
-  drop policy if exists "Users manage own wallets" on public.wallet_configurations;
-  -- Offerwall Providers
-  drop policy if exists "Anyone can view offerwall providers" on public.offerwall_providers;
-  drop policy if exists "Admins manage providers" on public.offerwall_providers;
-  -- Offerwall API Configs
-  drop policy if exists "Admins manage API configs" on public.offerwall_api_configs;
-  -- Offerwalls
-  drop policy if exists "Anyone can view active offerwalls" on public.offerwalls;
-  drop policy if exists "Admins manage offerwalls" on public.offerwalls;
-  -- Locked Offerwalls
-  drop policy if exists "Anyone can view locked offerwall conditions" on public.locked_offerwalls;
-  drop policy if exists "Admins manage locked offerwalls" on public.locked_offerwalls;
-  -- Offer Unlock Rules
-  drop policy if exists "Anyone can view unlock rules" on public.offer_unlock_rules;
-  drop policy if exists "Admins manage unlock rules" on public.offer_unlock_rules;
-  -- Surveys
-  drop policy if exists "Anyone can view active surveys" on public.surveys;
-  drop policy if exists "Admins manage surveys" on public.surveys;
-  -- Promo Codes
-  drop policy if exists "Anyone can view active promo codes" on public.promo_codes;
-  drop policy if exists "Admins manage promo codes" on public.promo_codes;
-  -- Promo Code Redemptions
-  drop policy if exists "Users view own redemptions" on public.promo_code_redemptions;
-  drop policy if exists "Authenticated users can redeem" on public.promo_code_redemptions;
-  -- Referral Links
-  drop policy if exists "Users view own referral link" on public.referral_links;
-  drop policy if exists "Anyone can view referral code for signup" on public.referral_links;
-  -- Referral Earnings
-  drop policy if exists "Users view own referral earnings" on public.referral_earnings;
-  drop policy if exists "Admins view all referral earnings" on public.referral_earnings;
-  -- Rewards
-  drop policy if exists "Anyone can view rewards" on public.rewards;
-  drop policy if exists "Admins manage rewards" on public.rewards;
-  -- Daily Rewards
-  drop policy if exists "Users view own daily rewards" on public.daily_rewards;
-  drop policy if exists "Users claim daily rewards" on public.daily_rewards;
-  -- Achievement Rewards
-  drop policy if exists "Users view own achievements" on public.achievement_rewards;
-  -- Leaderboard
-  drop policy if exists "Anyone can view leaderboard" on public.leaderboard_statistics;
-  -- Login History
-  drop policy if exists "Users view own login history" on public.login_history;
-  drop policy if exists "Admins view all login history" on public.login_history;
-  -- User Activity Logs
-  drop policy if exists "Admins view activity logs" on public.user_activity_logs;
-  -- Admin Accounts
-  drop policy if exists "Admins manage admin accounts" on public.admin_accounts;
-  -- Admin Activity Logs
-  drop policy if exists "Admins view activity logs" on public.admin_activity_logs;
-  -- Security Logs
-  drop policy if exists "Admins view security logs" on public.security_logs;
-  -- Fraud Detection Logs
-  drop policy if exists "Admins manage fraud logs" on public.fraud_detection_logs;
-  -- Support Tickets
-  drop policy if exists "Users manage own tickets" on public.support_tickets;
-  drop policy if exists "Admins manage all tickets" on public.support_tickets;
-  -- Ticket Replies
-  drop policy if exists "Users view own ticket replies" on public.ticket_replies;
-  drop policy if exists "Users create ticket replies" on public.ticket_replies;
-  drop policy if exists "Admins manage all replies" on public.ticket_replies;
-  -- Site Settings
-  drop policy if exists "Anyone can view site settings" on public.site_settings;
-  drop policy if exists "Admins update site settings" on public.site_settings;
-  -- API Integrations
-  drop policy if exists "Admins manage API integrations" on public.api_integrations;
-  -- User Levels
-  drop policy if exists "Anyone can view level definitions" on public.user_levels;
-  drop policy if exists "Admins manage levels" on public.user_levels;
-  -- System Notifications
-  drop policy if exists "Admins manage system notifications" on public.system_notifications;
-  -- Offerwall Status History
-  drop policy if exists "Admins view status history" on public.offerwall_status_history;
-  -- User Balances
-  drop policy if exists "Users view own balance" on public.user_balances;
-  drop policy if exists "Admins view all balances" on public.user_balances;
-  -- Email Verifications
-  drop policy if exists "Users view own verifications" on public.email_verifications;
-end $$;
+-- Safely drop all existing policies (with table existence check)
+drop policy if exists "Anyone can view profiles (public leaderboard)" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Admins can manage all profiles" on public.profiles;
+drop policy if exists "Users view own transactions" on public.coin_transactions;
+drop policy if exists "Admins view all transactions" on public.coin_transactions;
+drop policy if exists "Users view own earnings" on public.earnings_history;
+drop policy if exists "Admins view all earnings" on public.earnings_history;
+drop policy if exists "Public read access on earnings feed" on public.live_earnings;
+drop policy if exists "Authenticated users can log earnings" on public.live_earnings;
+drop policy if exists "Users view own notifications" on public.notifications;
+drop policy if exists "Users update own notifications (mark read)" on public.notifications;
+drop policy if exists "Users delete own notifications" on public.notifications;
+drop policy if exists "System can insert notifications" on public.notifications;
+drop policy if exists "Users manage own notification settings" on public.notification_settings;
+drop policy if exists "Users view own withdrawals" on public.withdrawals;
+drop policy if exists "Users create own withdrawals" on public.withdrawals;
+drop policy if exists "Admins manage all withdrawals" on public.withdrawals;
+drop policy if exists "Anyone can view active withdrawal methods" on public.withdrawal_methods;
+drop policy if exists "Admins manage withdrawal methods" on public.withdrawal_methods;
+drop policy if exists "Users manage own wallets" on public.wallet_configurations;
+drop policy if exists "Anyone can view offerwall providers" on public.offerwall_providers;
+drop policy if exists "Admins manage providers" on public.offerwall_providers;
+drop policy if exists "Admins manage API configs" on public.offerwall_api_configs;
+drop policy if exists "Anyone can view active offerwalls" on public.offerwalls;
+drop policy if exists "Admins manage offerwalls" on public.offerwalls;
+drop policy if exists "Anyone can view locked offerwall conditions" on public.locked_offerwalls;
+drop policy if exists "Admins manage locked offerwalls" on public.locked_offerwalls;
+drop policy if exists "Anyone can view unlock rules" on public.offer_unlock_rules;
+drop policy if exists "Admins manage unlock rules" on public.offer_unlock_rules;
+drop policy if exists "Anyone can view active surveys" on public.surveys;
+drop policy if exists "Admins manage surveys" on public.surveys;
+drop policy if exists "Anyone can view active promo codes" on public.promo_codes;
+drop policy if exists "Admins manage promo codes" on public.promo_codes;
+drop policy if exists "Users view own redemptions" on public.promo_code_redemptions;
+drop policy if exists "Authenticated users can redeem" on public.promo_code_redemptions;
+drop policy if exists "Users view own referral link" on public.referral_links;
+drop policy if exists "Anyone can view referral code for signup" on public.referral_links;
+drop policy if exists "Users view own referral earnings" on public.referral_earnings;
+drop policy if exists "Admins view all referral earnings" on public.referral_earnings;
+drop policy if exists "Anyone can view rewards" on public.rewards;
+drop policy if exists "Admins manage rewards" on public.rewards;
+drop policy if exists "Users view own daily rewards" on public.daily_rewards;
+drop policy if exists "Users claim daily rewards" on public.daily_rewards;
+drop policy if exists "Users view own achievements" on public.achievement_rewards;
+drop policy if exists "Anyone can view leaderboard" on public.leaderboard_statistics;
+drop policy if exists "Users view own login history" on public.login_history;
+drop policy if exists "Admins view all login history" on public.login_history;
+drop policy if exists "Admins view activity logs" on public.user_activity_logs;
+drop policy if exists "Admins manage admin accounts" on public.admin_accounts;
+drop policy if exists "Admins view activity logs" on public.admin_activity_logs;
+drop policy if exists "Admins view security logs" on public.security_logs;
+drop policy if exists "Admins manage fraud logs" on public.fraud_detection_logs;
+drop policy if exists "Users manage own tickets" on public.support_tickets;
+drop policy if exists "Admins manage all tickets" on public.support_tickets;
+drop policy if exists "Users view own ticket replies" on public.ticket_replies;
+drop policy if exists "Users create ticket replies" on public.ticket_replies;
+drop policy if exists "Admins manage all replies" on public.ticket_replies;
+drop policy if exists "Anyone can view site settings" on public.site_settings;
+drop policy if exists "Admins update site settings" on public.site_settings;
+drop policy if exists "Admins manage API integrations" on public.api_integrations;
+drop policy if exists "Anyone can view level definitions" on public.user_levels;
+drop policy if exists "Admins manage levels" on public.user_levels;
+drop policy if exists "Admins manage system notifications" on public.system_notifications;
+drop policy if exists "Admins view status history" on public.offerwall_status_history;
+drop policy if exists "Users view own balance" on public.user_balances;
+drop policy if exists "Admins view all balances" on public.user_balances;
+drop policy if exists "Users view own verifications" on public.email_verifications;
 
 -- ── Recreate all policies ──
 
 -- PROFILES
+drop policy if exists "Anyone can view profiles (public leaderboard)" on public.profiles;
 create policy "Anyone can view profiles (public leaderboard)" on public.profiles
   for select using (true);
+drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile" on public.profiles
   for update using (auth.uid() = id);
+drop policy if exists "Users can insert own profile" on public.profiles;
+create policy "Users can insert own profile" on public.profiles
+  for insert with check (auth.uid() = id);
+drop policy if exists "Admins can manage all profiles" on public.profiles;
 create policy "Admins can manage all profiles" on public.profiles
   for all using (public.fn_is_admin());
 
 -- COIN TRANSACTIONS
+drop policy if exists "Users view own transactions" on public.coin_transactions;
 create policy "Users view own transactions" on public.coin_transactions
   for select using (auth.uid() = user_id);
+drop policy if exists "Admins view all transactions" on public.coin_transactions;
 create policy "Admins view all transactions" on public.coin_transactions
   for select using (public.fn_is_admin());
 
 -- EARNINGS HISTORY
+drop policy if exists "Users view own earnings" on public.earnings_history;
 create policy "Users view own earnings" on public.earnings_history
   for select using (auth.uid() = user_id);
+drop policy if exists "Admins view all earnings" on public.earnings_history;
 create policy "Admins view all earnings" on public.earnings_history
   for select using (public.fn_is_admin());
 
 -- LIVE EARNINGS (public feed)
+drop policy if exists "Public read access on earnings feed" on public.live_earnings;
 create policy "Public read access on earnings feed" on public.live_earnings
   for select using (true);
+drop policy if exists "Authenticated users can log earnings" on public.live_earnings;
 create policy "Authenticated users can log earnings" on public.live_earnings
   for insert with check (auth.role() = 'authenticated');
 
 -- NOTIFICATIONS
+drop policy if exists "Users view own notifications" on public.notifications;
 create policy "Users view own notifications" on public.notifications
   for select using (auth.uid() = user_id);
+drop policy if exists "Users update own notifications (mark read)" on public.notifications;
 create policy "Users update own notifications (mark read)" on public.notifications
   for update using (auth.uid() = user_id);
+drop policy if exists "Users delete own notifications" on public.notifications;
 create policy "Users delete own notifications" on public.notifications
   for delete using (auth.uid() = user_id);
+drop policy if exists "System can insert notifications" on public.notifications;
 create policy "System can insert notifications" on public.notifications
   for insert with check (auth.role() in ('authenticated', 'service_role'));
 
 -- NOTIFICATION SETTINGS
+drop policy if exists "Users manage own notification settings" on public.notification_settings;
 create policy "Users manage own notification settings" on public.notification_settings
   for all using (auth.uid() = user_id);
 
 -- WITHDRAWALS
+drop policy if exists "Users view own withdrawals" on public.withdrawals;
 create policy "Users view own withdrawals" on public.withdrawals
   for select using (auth.uid() = user_id);
+drop policy if exists "Users create own withdrawals" on public.withdrawals;
 create policy "Users create own withdrawals" on public.withdrawals
   for insert with check (auth.uid() = user_id);
+drop policy if exists "Admins manage all withdrawals" on public.withdrawals;
 create policy "Admins manage all withdrawals" on public.withdrawals
   for all using (public.fn_is_admin());
 
 -- WITHDRAWAL METHODS
+drop policy if exists "Anyone can view active withdrawal methods" on public.withdrawal_methods;
 create policy "Anyone can view active withdrawal methods" on public.withdrawal_methods
   for select using (status = 'ACTIVE');
+drop policy if exists "Admins manage withdrawal methods" on public.withdrawal_methods;
 create policy "Admins manage withdrawal methods" on public.withdrawal_methods
   for all using (public.fn_is_admin());
 
 -- WALLET CONFIGURATIONS
+drop policy if exists "Users manage own wallets" on public.wallet_configurations;
 create policy "Users manage own wallets" on public.wallet_configurations
   for all using (auth.uid() = user_id);
 
 -- OFFERWALL PROVIDERS
+drop policy if exists "Anyone can view offerwall providers" on public.offerwall_providers;
 create policy "Anyone can view offerwall providers" on public.offerwall_providers
   for select using (true);
+drop policy if exists "Admins manage providers" on public.offerwall_providers;
 create policy "Admins manage providers" on public.offerwall_providers
   for all using (public.fn_is_admin());
 
 -- OFFERWALL API CONFIGS (sensitive - admins only)
+drop policy if exists "Admins manage API configs" on public.offerwall_api_configs;
 create policy "Admins manage API configs" on public.offerwall_api_configs
   for all using (public.fn_is_admin());
 
 -- OFFERWALLS
+drop policy if exists "Anyone can view active offerwalls" on public.offerwalls;
 create policy "Anyone can view active offerwalls" on public.offerwalls
   for select using (status = 'ACTIVE' or public.fn_is_admin());
+drop policy if exists "Admins manage offerwalls" on public.offerwalls;
 create policy "Admins manage offerwalls" on public.offerwalls
   for all using (public.fn_is_admin());
 
 -- LOCKED OFFERWALLS
+drop policy if exists "Anyone can view locked offerwall conditions" on public.locked_offerwalls;
 create policy "Anyone can view locked offerwall conditions" on public.locked_offerwalls
   for select using (true);
+drop policy if exists "Admins manage locked offerwalls" on public.locked_offerwalls;
 create policy "Admins manage locked offerwalls" on public.locked_offerwalls
   for all using (public.fn_is_admin());
 
 -- OFFER UNLOCK RULES
+drop policy if exists "Anyone can view unlock rules" on public.offer_unlock_rules;
 create policy "Anyone can view unlock rules" on public.offer_unlock_rules
   for select using (true);
+drop policy if exists "Admins manage unlock rules" on public.offer_unlock_rules;
 create policy "Admins manage unlock rules" on public.offer_unlock_rules
   for all using (public.fn_is_admin());
 
 -- SURVEYS
+drop policy if exists "Anyone can view active surveys" on public.surveys;
 create policy "Anyone can view active surveys" on public.surveys
   for select using (is_active = true or public.fn_is_admin());
+drop policy if exists "Admins manage surveys" on public.surveys;
 create policy "Admins manage surveys" on public.surveys
   for all using (public.fn_is_admin());
 
 -- PROMO CODES
+drop policy if exists "Anyone can view active promo codes" on public.promo_codes;
 create policy "Anyone can view active promo codes" on public.promo_codes
   for select using (is_active = true or public.fn_is_admin());
+drop policy if exists "Admins manage promo codes" on public.promo_codes;
 create policy "Admins manage promo codes" on public.promo_codes
   for all using (public.fn_is_admin());
 
 -- PROMO CODE REDEMPTIONS
+drop policy if exists "Users view own redemptions" on public.promo_code_redemptions;
 create policy "Users view own redemptions" on public.promo_code_redemptions
   for select using (auth.uid() = user_id);
+drop policy if exists "Authenticated users can redeem" on public.promo_code_redemptions;
 create policy "Authenticated users can redeem" on public.promo_code_redemptions
   for insert with check (auth.role() = 'authenticated');
 
 -- REFERRAL LINKS
+drop policy if exists "Users view own referral link" on public.referral_links;
 create policy "Users view own referral link" on public.referral_links
   for select using (auth.uid() = user_id);
+drop policy if exists "Anyone can view referral code for signup" on public.referral_links;
 create policy "Anyone can view referral code for signup" on public.referral_links
   for select using (true);
 
 -- REFERRAL EARNINGS
+drop policy if exists "Users view own referral earnings" on public.referral_earnings;
 create policy "Users view own referral earnings" on public.referral_earnings
   for select using (auth.uid() = referrer_id);
+drop policy if exists "Admins view all referral earnings" on public.referral_earnings;
 create policy "Admins view all referral earnings" on public.referral_earnings
   for select using (public.fn_is_admin());
 
 -- REWARDS
+drop policy if exists "Anyone can view rewards" on public.rewards;
 create policy "Anyone can view rewards" on public.rewards
   for select using (true);
+drop policy if exists "Admins manage rewards" on public.rewards;
 create policy "Admins manage rewards" on public.rewards
   for all using (public.fn_is_admin());
 
 -- DAILY REWARDS
+drop policy if exists "Users view own daily rewards" on public.daily_rewards;
 create policy "Users view own daily rewards" on public.daily_rewards
   for select using (auth.uid() = user_id);
+drop policy if exists "Users claim daily rewards" on public.daily_rewards;
 create policy "Users claim daily rewards" on public.daily_rewards
   for insert with check (auth.uid() = user_id);
 
 -- ACHIEVEMENT REWARDS
+drop policy if exists "Users view own achievements" on public.achievement_rewards;
 create policy "Users view own achievements" on public.achievement_rewards
   for select using (auth.uid() = user_id);
 
 -- LEADERBOARD
+drop policy if exists "Anyone can view leaderboard" on public.leaderboard_statistics;
 create policy "Anyone can view leaderboard" on public.leaderboard_statistics
   for select using (true);
 
 -- LOGIN HISTORY
+drop policy if exists "Users view own login history" on public.login_history;
 create policy "Users view own login history" on public.login_history
   for select using (auth.uid() = user_id);
+drop policy if exists "Admins view all login history" on public.login_history;
 create policy "Admins view all login history" on public.login_history
   for select using (public.fn_is_admin());
 
 -- USER ACTIVITY LOGS
+drop policy if exists "Admins view activity logs" on public.user_activity_logs;
 create policy "Admins view activity logs" on public.user_activity_logs
   for select using (public.fn_is_admin());
 
 -- ADMIN ACCOUNTS
+drop policy if exists "Admins manage admin accounts" on public.admin_accounts;
 create policy "Admins manage admin accounts" on public.admin_accounts
   for all using (public.fn_is_admin());
 
 -- ADMIN ACTIVITY LOGS
+drop policy if exists "Admins view activity logs" on public.admin_activity_logs;
 create policy "Admins view activity logs" on public.admin_activity_logs
   for select using (public.fn_is_admin());
 
 -- SECURITY LOGS
+drop policy if exists "Admins view security logs" on public.security_logs;
 create policy "Admins view security logs" on public.security_logs
   for select using (public.fn_is_admin());
 
 -- FRAUD DETECTION LOGS
+drop policy if exists "Admins manage fraud logs" on public.fraud_detection_logs;
 create policy "Admins manage fraud logs" on public.fraud_detection_logs
   for all using (public.fn_is_admin());
 
 -- SUPPORT TICKETS
+drop policy if exists "Users manage own tickets" on public.support_tickets;
 create policy "Users manage own tickets" on public.support_tickets
   for all using (auth.uid() = user_id);
+drop policy if exists "Admins manage all tickets" on public.support_tickets;
 create policy "Admins manage all tickets" on public.support_tickets
   for all using (public.fn_is_admin());
 
 -- TICKET REPLIES
+drop policy if exists "Users view own ticket replies" on public.ticket_replies;
 create policy "Users view own ticket replies" on public.ticket_replies
   for select using (auth.uid() = user_id);
+drop policy if exists "Users create ticket replies" on public.ticket_replies;
 create policy "Users create ticket replies" on public.ticket_replies
   for insert with check (auth.uid() = user_id);
+drop policy if exists "Admins manage all replies" on public.ticket_replies;
 create policy "Admins manage all replies" on public.ticket_replies
   for all using (public.fn_is_admin());
 
 -- SITE SETTINGS
+drop policy if exists "Anyone can view site settings" on public.site_settings;
 create policy "Anyone can view site settings" on public.site_settings
   for select using (true);
+drop policy if exists "Admins update site settings" on public.site_settings;
 create policy "Admins update site settings" on public.site_settings
   for update using (public.fn_is_admin());
 
 -- API INTEGRATIONS (sensitive - admins only)
+drop policy if exists "Admins manage API integrations" on public.api_integrations;
 create policy "Admins manage API integrations" on public.api_integrations
   for all using (public.fn_is_admin());
 
 -- USER LEVELS
+drop policy if exists "Anyone can view level definitions" on public.user_levels;
 create policy "Anyone can view level definitions" on public.user_levels
   for select using (true);
+drop policy if exists "Admins manage levels" on public.user_levels;
 create policy "Admins manage levels" on public.user_levels
   for all using (public.fn_is_admin());
 
 -- SYSTEM NOTIFICATIONS
+drop policy if exists "Admins manage system notifications" on public.system_notifications;
 create policy "Admins manage system notifications" on public.system_notifications
   for all using (public.fn_is_admin());
 
 -- OFFERWALL STATUS HISTORY
+drop policy if exists "Admins view status history" on public.offerwall_status_history;
 create policy "Admins view status history" on public.offerwall_status_history
   for select using (public.fn_is_admin());
 
 -- USER BALANCES
+drop policy if exists "Users view own balance" on public.user_balances;
 create policy "Users view own balance" on public.user_balances
   for select using (auth.uid() = user_id);
+drop policy if exists "Admins view all balances" on public.user_balances;
 create policy "Admins view all balances" on public.user_balances
   for select using (public.fn_is_admin());
 
 -- EMAIL VERIFICATIONS
+drop policy if exists "Users view own verifications" on public.email_verifications;
 create policy "Users view own verifications" on public.email_verifications
   for select using (auth.uid() = user_id);
+
 
 -- ════════════════════════════════════════════════════════════════════
 -- SUPABASE REALTIME (Instant Updates)
@@ -2061,29 +2160,46 @@ alter table public.restriction_history enable row level security;
 alter table public.ip_logs enable row level security;
 
 -- RLS policies
+drop policy if exists "Admins can read vpn_detection_logs" on public.vpn_detection_logs;
 create policy "Admins can read vpn_detection_logs" on public.vpn_detection_logs
   for select using (
     auth.role() = 'service_role' or
     exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)
   );
+drop policy if exists "Admins can insert vpn_detection_logs" on public.vpn_detection_logs;
 create policy "Admins can insert vpn_detection_logs" on public.vpn_detection_logs
   for insert with check (true);
+drop policy if exists "Admins can read user_restrictions" on public.user_restrictions;
 create policy "Admins can read user_restrictions" on public.user_restrictions
   for select using (
     auth.role() = 'service_role' or
     exists (select 1 from public.profiles where id = auth.uid() and is_admin = true) or
     user_id = auth.uid()
   );
+drop policy if exists "Admins can manage user_restrictions" on public.user_restrictions;
 create policy "Admins can manage user_restrictions" on public.user_restrictions
   for all using (auth.role() = 'service_role' or (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true)));
+drop policy if exists "Admins can read restriction_history" on public.restriction_history;
 create policy "Admins can read restriction_history" on public.restriction_history
   for select using (true);
+drop policy if exists "Admins can insert restriction_history" on public.restriction_history;
 create policy "Admins can insert restriction_history" on public.restriction_history
   for insert with check (true);
+drop policy if exists "Admins can read ip_logs" on public.ip_logs;
 create policy "Admins can read ip_logs" on public.ip_logs
   for select using (true);
+drop policy if exists "Admins can insert ip_logs" on public.ip_logs;
 create policy "Admins can insert ip_logs" on public.ip_logs
   for insert with check (true);
+
+-- ====================================================================
+-- SCHEMA PERMISSIONS — Grant access to Supabase roles
+-- ====================================================================
+
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to anon, authenticated, service_role;
+grant all on all sequences in schema public to anon, authenticated, service_role;
+grant all on all functions in schema public to anon, authenticated, service_role;
 
 -- ====================================================================
 -- END OF SCHEMA
