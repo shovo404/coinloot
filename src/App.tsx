@@ -9,7 +9,7 @@ import KycUploadPage from "./components/KycUploadPage";
 import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnSettings } from "./utils/vpnDetector";
 import { calcLevelFromBalance } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
-import { getSupabaseClient, getCurrentUser } from "./lib/supabase";
+import { getSupabaseClient, getCurrentSession, getCurrentUser } from "./lib/supabase";
 import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut } from "./lib/supabaseService";
 
 import AnimatedBackground from "./components/AnimatedBackground";
@@ -140,52 +140,92 @@ export default function App() {
     }
 
     let cancelled = false;
-    let authUnsub: (() => void) | null = null;
+
+    // Debug: check localStorage for session
+    const allKeys = Object.keys(window.localStorage).filter(k => k.startsWith("sb-"));
+    console.log("[Auth] Supabase storage keys found:", allKeys.length);
 
     async function init() {
-      // 1. Validate session with server (handles token refresh, rejects expired ones)
-      const user = await getCurrentUser();
-      if (cancelled) return;
-      if (user) {
-        const profile = await getProfile(user.id);
-        if (profile && !cancelled) {
-          setUserProfile(profile);
-          setIsDashboardView(true);
-          if (profile.is_admin) {
-            setActiveTab("admin");
-          }
-        }
-      }
-      if (!cancelled) setSessionLoaded(true);
+      try {
+        // 1. Subscribe FIRST to catch all events (INITIAL_SESSION, SIGNED_IN, etc.)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+          console.log("[Auth] onAuthStateChange event:", event, "user:", session?.user?.id);
 
-      // 2. Listen for future auth state changes
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-          if (session?.user) {
-            const profile = await getProfile(session.user.id);
-            if (profile) {
-              setUserProfile(profile);
-              setIsDashboardView(true);
-              if (profile.is_admin) {
-                setActiveTab("admin");
+          if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+            if (session?.user) {
+              const profile = await getProfile(session.user.id);
+              if (profile) {
+                setUserProfile(profile);
+                setIsDashboardView(true);
+                if (profile.is_admin) {
+                  setActiveTab("admin");
+                }
               }
             }
+          } else if (event === "SIGNED_OUT") {
+            console.log("[Auth] SIGNED_OUT received, clearing state");
+            setUserProfile(null);
+            setIsDashboardView(false);
+            setShowAdminLogin(false);
+            setNotifications([]);
           }
-        } else if (event === "SIGNED_OUT") {
-          setUserProfile(null);
-          setIsDashboardView(false);
-          setShowAdminLogin(false);
-          setNotifications([]);
+        });
+
+        // 2. Read session from storage FIRST (fast, no network)
+        const storedSession = await getCurrentSession();
+        console.log("[Auth] Stored session:", !!storedSession, "expires:", storedSession?.expires_at);
+
+        if (storedSession?.user) {
+          // Try server validation
+          let userProfile_data = null;
+          try {
+            const user = await getCurrentUser();
+            console.log("[Auth] Server validation user:", !!user);
+            if (user) {
+              userProfile_data = await getProfile(user.id);
+            }
+          } catch (err) {
+            console.warn("[Auth] Server validation failed, using stored session:", err);
+          }
+
+          // If server validation failed, try with stored session
+          if (!userProfile_data) {
+            console.log("[Auth] Falling back to stored session profile fetch");
+            try {
+              userProfile_data = await getProfile(storedSession.user.id);
+            } catch (err) {
+              console.warn("[Auth] Stored session profile fetch also failed:", err);
+            }
+          }
+
+          if (userProfile_data && !cancelled) {
+            console.log("[Auth] Restored profile:", userProfile_data.username, "admin:", userProfile_data.is_admin);
+            setUserProfile(userProfile_data);
+            setIsDashboardView(true);
+            if (userProfile_data.is_admin) {
+              setActiveTab("admin");
+            }
+          }
         }
-      });
-      authUnsub = () => subscription?.unsubscribe();
+
+        if (!cancelled) setSessionLoaded(true);
+
+        // Cleanup function for subscription
+        const cleanup = () => subscription?.unsubscribe();
+        return cleanup;
+      } catch (err) {
+        console.error("[Auth] init error:", err);
+        if (!cancelled) setSessionLoaded(true);
+        return () => {};
+      }
     }
 
-    init();
+    let cleanup: (() => void) | undefined;
+    init().then(fn => { cleanup = fn; });
 
     return () => {
       cancelled = true;
-      if (authUnsub) authUnsub();
+      if (cleanup) cleanup();
     };
   }, [supabase]);
 

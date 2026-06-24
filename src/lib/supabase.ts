@@ -14,9 +14,17 @@ export function getSupabaseClient(): SupabaseClient | null {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      detectSessionInUrl: true,
     },
     realtime: { params: { eventsPerSecond: 10 } },
   });
+
+  if (typeof window !== "undefined") {
+    const stored = window.localStorage.getItem(
+      `sb-${supabaseUrl.match(/(?:\/\/)([^.]+)/)?.[1] || ""}-auth-token`
+    );
+    console.log("[Supabase] Client created, stored session:", !!stored);
+  }
 
   return cachedClient;
 }
