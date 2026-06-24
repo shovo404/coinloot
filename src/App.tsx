@@ -139,48 +139,46 @@ export default function App() {
       return;
     }
 
+    let resolved = false;
     let authUnsub: (() => void) | null = null;
 
-    const init = async () => {
-      // 1. Try to restore existing session
-      const session = await getCurrentSession();
-      if (session?.user) {
-        const profile = await getProfile(session.user.id);
-        if (profile) {
-          setUserProfile(profile);
-          setIsDashboardView(true);
-          if (profile.is_admin) {
-            setActiveTab("admin");
-          }
-        }
-      }
-      setSessionLoaded(true);
-
-      // 2. Listen for auth state changes
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-          if (session?.user) {
-            const profile = await getProfile(session.user.id);
-            if (profile) {
-              setUserProfile(profile);
-              setIsDashboardView(true);
-              if (profile.is_admin) {
-                setActiveTab("admin");
-              }
+    // Subscribe FIRST to avoid race conditions with onAuthStateChange
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        if (session?.user) {
+          const profile = await getProfile(session.user.id);
+          if (profile) {
+            setUserProfile(profile);
+            setIsDashboardView(true);
+            if (profile.is_admin) {
+              setActiveTab("admin");
             }
           }
-        } else if (event === "SIGNED_OUT") {
-          setUserProfile(null);
-          setIsDashboardView(false);
-          setShowAdminLogin(false);
-          setNotifications([]);
         }
-      });
+      } else if (event === "SIGNED_OUT") {
+        setUserProfile(null);
+        setIsDashboardView(false);
+        setShowAdminLogin(false);
+        setNotifications([]);
+      }
+      if (!resolved) {
+        resolved = true;
+        setSessionLoaded(true);
+      }
+    });
 
-      authUnsub = () => subscription?.unsubscribe();
+    // Fallback: if no event fires within 3s, unblock UI anyway
+    const fallback = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        setSessionLoaded(true);
+      }
+    }, 3000);
+
+    authUnsub = () => {
+      clearTimeout(fallback);
+      subscription?.unsubscribe();
     };
-
-    init();
 
     return () => {
       if (authUnsub) authUnsub();
