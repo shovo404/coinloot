@@ -18,6 +18,8 @@ import { playCoinSound } from "../utils/coinSound";
 import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs } from "../utils/vpnDetector";
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
+import { realtimeManager } from "../lib/realtimeManager";
+import { saveDeveloperMode, saveHomepageSections, saveLockRules, saveGlobalPromoNotification } from "../lib/adminDb";
 import { 
   getSocialBountyConfig, saveSocialBountyConfig, 
   getWeeklyChallengeConfig, saveWeeklyChallengeConfig, 
@@ -901,10 +903,82 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     setSettingsLoaded(true);
   }, [settingsLoaded]);
 
+  // ── Sync site_settings from Supabase to localStorage ──
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    sb.from("site_settings").select("*").then(({ data, error }) => {
+      if (error || !data) return;
+      const settings: Record<string, string> = {};
+      for (const row of data) {
+        settings[row.setting_key] = row.setting_value;
+      }
+      if (settings.siteName) setSiteName(settings.siteName);
+      if (settings.rate) setRate(settings.rate);
+      if (settings.minWd) setMinWd(settings.minWd);
+      if (settings.smtpHost) setSmtpHost(settings.smtpHost);
+      if (settings.smtpPort) setSmtpPort(settings.smtpPort);
+      if (settings.smtpUser) setSmtpUser(settings.smtpUser);
+      if (settings.smtpPass) setSmtpPass(settings.smtpPass);
+    });
+  }, [settingsLoaded]);
+
+  // ── Real-time site_settings subscription ──
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    const cleanup = realtimeManager.subscribe("admin-site-settings", {
+      table: "site_settings",
+      event: "UPDATE",
+      callback: (payload) => {
+        const row = payload.new as any;
+        const key = row.setting_key;
+        const val = row.setting_value;
+        if (key === "site_name") setSiteName(val);
+        else if (key === "coin_to_usd_rate") setRate(val);
+        else if (key === "min_withdrawal") setMinWd(val);
+        else if (key === "smtp_host") setSmtpHost(val);
+        else if (key === "smtp_port") setSmtpPort(val);
+        else if (key === "smtp_user") setSmtpUser(val);
+        else if (key === "smtp_pass") setSmtpPass(val);
+
+        // Update localStorage
+        const saved = JSON.parse(localStorage.getItem("coinloot_site_settings") || "{}");
+        saved[key] = val;
+        localStorage.setItem("coinloot_site_settings", JSON.stringify(saved));
+      },
+    });
+
+    return () => {
+      realtimeManager.unsubscribe("admin-site-settings");
+      cleanup();
+    };
+  }, []);
+
   const saveSettings = () => {
     localStorage.setItem("coinloot_site_settings", JSON.stringify({ siteName, rate, minWd, smtpHost, smtpPort, smtpUser, smtpPass, demoData, developerMode }));
     localStorage.setItem("coinloot_db_config", JSON.stringify({ projectName: dbProjectName, projectUrl: dbProjectUrl, projectId: dbProjectId, apiKey: dbApiKey }));
     localStorage.setItem("coinloot_telegram_config", JSON.stringify({ token: telegramToken, chatId: telegramChatId, enabled: telegramEnabled }));
+    // Sync to Supabase site_settings table
+    const sb = getSupabaseClient();
+    if (sb) {
+      const upsertSettings = [
+        { setting_key: "site_name", setting_value: siteName },
+        { setting_key: "coin_to_usd_rate", setting_value: rate },
+        { setting_key: "min_withdrawal", setting_value: minWd },
+        { setting_key: "smtp_host", setting_value: smtpHost },
+        { setting_key: "smtp_port", setting_value: smtpPort },
+        { setting_key: "smtp_user", setting_value: smtpUser },
+        { setting_key: "smtp_pass", setting_value: smtpPass },
+        { setting_key: "developer_mode", setting_value: JSON.stringify({ enabled: developerMode }) },
+      ];
+      sb.from("site_settings").upsert(upsertSettings, { onConflict: "setting_key" }).then(({ error }) => {
+        if (error) console.warn("Failed to sync settings to Supabase:", error.message);
+      });
+      saveDeveloperMode({ enabled: developerMode, message: "" }).catch(() => {});
+    }
     addLog("SETTINGS_UPDATED", "settings", "site", "Updated site settings");
     showNotif("success", "Settings saved!");
   };
@@ -1001,6 +1075,103 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     load();
     return () => { cancelled = true; };
   }, [profilesRefreshKey]);
+
+  // ── Real-time profiles sync for admin panel ──
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    const handleProfileChange = (payload: any) => {
+      const r = payload.new || payload.old;
+      if (!r?.id) return;
+
+      const mapRow = (row: any): UserProfile => ({
+        id: row.id,
+        username: row.username || row.full_name || "User",
+        email: row.email || "",
+        balance_coins: row.balance_coins || 0,
+        balance_usd: (row.balance_coins || 0) / 1000,
+        xp: row.xp || 0,
+        level: row.level || 1,
+        streak_days: row.streak_days || 0,
+        referred_by: row.referred_by || null,
+        referrals_count: row.referrals_count || 0,
+        total_earned_coins: row.total_earned_coins || 0,
+        total_withdrawn_usd: row.total_withdrawn_usd || 0,
+        kyc_status: row.kyc_status || "NOT_STARTED",
+        kyc_required: row.kyc_required ?? false,
+        is_admin: row.is_admin || false,
+        vpn_detected: row.vpn_detected || false,
+        device_fingerprint: row.device_fingerprint || "",
+        country: row.country || "",
+      });
+
+      if (payload.eventType === "INSERT") {
+        setSupabaseProfiles(prev => [mapRow(payload.new), ...prev]);
+      } else if (payload.eventType === "UPDATE") {
+        setSupabaseProfiles(prev => prev.map(p => p.id === payload.new.id ? mapRow(payload.new) : p));
+      } else if (payload.eventType === "DELETE") {
+        setSupabaseProfiles(prev => prev.filter(p => p.id !== payload.old.id));
+      }
+    };
+
+    const cleanupInsert = realtimeManager.subscribe("admin-profiles-insert", {
+      table: "profiles", event: "INSERT", callback: handleProfileChange,
+    });
+    const cleanupUpdate = realtimeManager.subscribe("admin-profiles-update", {
+      table: "profiles", event: "UPDATE", callback: handleProfileChange,
+    });
+    const cleanupDelete = realtimeManager.subscribe("admin-profiles-delete", {
+      table: "profiles", event: "DELETE", callback: handleProfileChange,
+    });
+
+    return () => {
+      realtimeManager.unsubscribe("admin-profiles-insert");
+      realtimeManager.unsubscribe("admin-profiles-update");
+      realtimeManager.unsubscribe("admin-profiles-delete");
+      cleanupInsert();
+      cleanupUpdate();
+      cleanupDelete();
+    };
+  }, []);
+
+  // ── Real-time support tickets sync ──
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    const handleTicketChange = (payload: any) => {
+      const ticket = payload.new || payload.old;
+      if (!ticket) return;
+
+      if (payload.eventType === "INSERT") {
+        setTicketList(prev => [ticket, ...prev]);
+      } else if (payload.eventType === "UPDATE") {
+        setTicketList(prev => prev.map((t: any) => t.id === ticket.id ? ticket : t));
+      } else if (payload.eventType === "DELETE") {
+        setTicketList(prev => prev.filter((t: any) => t.id !== ticket.id));
+      }
+    };
+
+    const cleanupInsert = realtimeManager.subscribe("admin-tickets-insert", {
+      table: "support_tickets", event: "INSERT", callback: handleTicketChange,
+    });
+    const cleanupUpdate = realtimeManager.subscribe("admin-tickets-update", {
+      table: "support_tickets", event: "UPDATE", callback: handleTicketChange,
+    });
+    const cleanupDelete = realtimeManager.subscribe("admin-tickets-delete", {
+      table: "support_tickets", event: "DELETE", callback: handleTicketChange,
+    });
+
+    return () => {
+      realtimeManager.unsubscribe("admin-tickets-insert");
+      realtimeManager.unsubscribe("admin-tickets-update");
+      realtimeManager.unsubscribe("admin-tickets-delete");
+      cleanupInsert();
+      cleanupUpdate();
+      cleanupDelete();
+    };
+  }, []);
 
   // ── Tickets State ──
   const [ticketSelected, setTicketSelected] = useState<any | null>(null);
@@ -1659,15 +1830,24 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                   </div>
                 )}
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => {
+                  <button onClick={async () => {
                     const ts = Date.now();
                     localStorage.setItem("coinloot_global_notif_sent_at", String(ts));
-                    showNotif("success", "Global notification sent to all users");
+                    await saveGlobalPromoNotification({
+                      text: globalNotifText,
+                      promoEnabled: globalNotifPromo,
+                      promoCode: globalNotifPromoCode,
+                      promoCoins: globalNotifPromoCoins,
+                      promoDuration: promoDurDays * 86400 + promoDurHours * 3600 + promoDurMins * 60 + promoDurSecs,
+                      sentAt: String(ts),
+                      startAt: null,
+                    }).catch(() => {});
+                    showNotif("success", "Global notification saved");
                     addLog("GLOBAL_NOTIF_SENT", "notification", "all", `Sent: ${globalNotifText}`);
                   }} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                    <Send className="w-3 h-3" /> Send Notification
+                    <Send className="w-3 h-3" /> Save &amp; Notify
                   </button>
-                  <button onClick={() => {
+                  <button onClick={async () => {
                     const notifId = `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
                     try {
                       const allAccs = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
@@ -1678,6 +1858,15 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       });
                     } catch {}
                     localStorage.setItem("coinloot_global_notif_sent_at", String(Date.now()));
+                    await saveGlobalPromoNotification({
+                      text: globalNotifText,
+                      promoEnabled: globalNotifPromo,
+                      promoCode: globalNotifPromoCode,
+                      promoCoins: globalNotifPromoCoins,
+                      promoDuration: promoDurDays * 86400 + promoDurHours * 3600 + promoDurMins * 60 + promoDurSecs,
+                      sentAt: String(Date.now()),
+                      startAt: null,
+                    }).catch(() => {});
                     showNotif("success", "Broadcast sent to all users");
                     addLog("GLOBAL_NOTIF_BROADCAST", "notification", "all", `Broadcast: ${globalNotifText || globalNotifPromoCode}`);
                   }} className="flex-1 py-2.5 rounded-xl bg-purple-500/10 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5">
@@ -2233,6 +2422,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const saveRules = (updated: typeof rules) => {
         setRules(updated);
         localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated));
+        saveLockRules(updated).catch(() => {});
       };
       const addRule = () => {
         if (!newRule.name) return showNotif("error", "Rule name required");
@@ -3187,6 +3377,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         const updated = { ...homepageSections, [key]: !homepageSections[key] };
         setHomepageSections(updated);
         localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
+        saveHomepageSections(updated).catch(() => {});
         window.dispatchEvent(new CustomEvent("homepage-sections-changed"));
         showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
       };

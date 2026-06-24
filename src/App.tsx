@@ -10,7 +10,9 @@ import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnS
 import { calcLevelFromBalance } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 import { getSupabaseClient, getCurrentSession, getCurrentUser } from "./lib/supabase";
-import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut } from "./lib/supabaseService";
+import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting } from "./lib/supabaseService";
+import { realtimeManager } from "./lib/realtimeManager";
+import { AppRealtimeProvider } from "./hooks/useAppRealtimeState";
 
 import AnimatedBackground from "./components/AnimatedBackground";
 import Globe3D from "./components/Globe3D";
@@ -333,6 +335,72 @@ export default function App() {
     };
   }, [supabase]);
 
+  // ── Realtime notification subscriptions ──
+  useEffect(() => {
+    if (!userProfile?.id || !supabase) return;
+
+    const cleanup = realtimeManager.subscribe(`app-notifs-${userProfile.id}`, {
+      table: "notifications",
+      event: "INSERT",
+      filter: `user_id=eq.${userProfile.id}`,
+      callback: (payload) => {
+        const n = payload.new as any;
+        setNotifications(prev => {
+          const mapped: AppNotification = {
+            id: n.id,
+            title: n.title,
+            description: n.message || n.description,
+            time: n.created_at,
+            category: n.category || "system",
+            unread: !n.is_read,
+            coinsEarned: n.coins_earned,
+            sourceName: n.source_name,
+          };
+          return [mapped, ...prev.slice(0, 49)];
+        });
+        playNotificationSound();
+      },
+    });
+
+    return () => {
+      realtimeManager.unsubscribe(`app-notifs-${userProfile.id}`);
+      cleanup();
+    };
+  }, [userProfile?.id, supabase]);
+
+  // ── Realtime profile sync ──
+  useEffect(() => {
+    if (!userProfile?.id || !supabase) return;
+
+    const cleanup = realtimeManager.subscribe(`app-profile-${userProfile.id}`, {
+      table: "profiles",
+      event: "UPDATE",
+      filter: `id=eq.${userProfile.id}`,
+      callback: (payload) => {
+        const updated = payload.new as any;
+        setUserProfile(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            balance_coins: updated.balance_coins ?? prev.balance_coins,
+            balance_usd: updated.balance_usd ?? (updated.balance_coins ?? prev.balance_coins) / 1000,
+            total_earned_coins: updated.total_earned_coins ?? prev.total_earned_coins,
+            level: updated.level ?? prev.level,
+            xp: updated.xp ?? prev.xp,
+            kyc_status: updated.kyc_status ?? prev.kyc_status,
+            vpn_detected: updated.vpn_detected ?? prev.vpn_detected,
+            is_banned: updated.is_banned ?? prev.is_banned,
+          };
+        });
+      },
+    });
+
+    return () => {
+      realtimeManager.unsubscribe(`app-profile-${userProfile.id}`);
+      cleanup();
+    };
+  }, [userProfile?.id, supabase]);
+
   // ── Notifications from Supabase ──
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
@@ -611,28 +679,25 @@ export default function App() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  // If admin is logged in, show the dedicated admin layout
-  if (userProfile && userProfile.is_admin && isDashboardView) {
-    return (
-      <div className="relative w-full min-h-screen text-slate-100 font-sans bg-slate-950">
-        <DeveloperModeBanner />
-        <AdminLayout
-          user={userProfile}
-          onRewardEarned={handleRewardEarned}
-          onLogout={handleLogout}
-          notifications={notifications}
-        />
-        <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
-        <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
-        {userProfile && <RestrictionPage userId={userProfile.id} />}
-        {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}
-        <RewardPopup popups={rewardPopups} onDismiss={dismissPopup} />
-      </div>
-    );
-  }
-
   return (
-    <div className="relative overflow-x-hidden w-full min-h-screen text-slate-100 flex flex-col font-sans transition-all selection:bg-cyan-500/20 selection:text-cyan-200 bg-slate-950">
+    <AppRealtimeProvider>
+      {userProfile && userProfile.is_admin && isDashboardView ? (
+        <div className="relative w-full min-h-screen text-slate-100 font-sans bg-slate-950">
+          <DeveloperModeBanner />
+          <AdminLayout
+            user={userProfile}
+            onRewardEarned={handleRewardEarned}
+            onLogout={handleLogout}
+            notifications={notifications}
+          />
+          <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
+          <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
+          {userProfile && <RestrictionPage userId={userProfile.id} />}
+          {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}
+          <RewardPopup popups={rewardPopups} onDismiss={dismissPopup} />
+        </div>
+      ) : (
+        <div className="relative overflow-x-hidden w-full min-h-screen text-slate-100 flex flex-col font-sans transition-all selection:bg-cyan-500/20 selection:text-cyan-200 bg-slate-950">
       <AnimatedBackground />
       <DeveloperModeBanner />
       <Navbar
@@ -1167,6 +1232,8 @@ export default function App() {
           </div>
         </nav>
       )}
-    </div>
+      </div>
+      )}
+    </AppRealtimeProvider>
   );
 }
