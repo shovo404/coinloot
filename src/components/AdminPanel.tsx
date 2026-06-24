@@ -1393,7 +1393,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", "User deleted");
   };
 
-  const handleUpdateProfile = (targetId: string, updates: Partial<UserProfile>) => {
+  const handleUpdateProfile = async (targetId: string, updates: Partial<UserProfile>) => {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        await sb.from("profiles").update(updates).eq("id", targetId);
+        setProfilesRefreshKey((k) => k + 1);
+        addLog("USER_UPDATED", "user", targetId, `Updated profile: ${Object.keys(updates).join(", ")}`);
+        showNotif("success", "User profile updated");
+        return;
+      } catch {}
+    }
     const accs = getAccounts();
     const idx = accs.findIndex((a) => a.profile.id === targetId);
     if (idx === -1) return showNotif("error", "User not found");
@@ -3055,7 +3065,17 @@ const handleSaveOffers = (updated: typeof offers) => {
       const approvedKyc = profiles.filter(p => p.kyc_status === "APPROVED");
       const rejectedKyc = profiles.filter(p => p.kyc_status === "REJECTED");
 
-      const handleKycAction = (userId: string, action: "APPROVED" | "REJECTED") => {
+      const handleKycAction = async (userId: string, action: "APPROVED" | "REJECTED") => {
+        const sb = getSupabaseClient();
+        if (sb) {
+          try {
+            await sb.from("kyc_records").update({ status: action }).eq("user_id", userId);
+            await sb.from("profiles").update({ kyc_status: action }).eq("id", userId);
+            setProfilesRefreshKey(k => k + 1);
+            showNotif("success", `KYC ${action} for user`);
+            return;
+          } catch {}
+        }
         const stored = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
         const idx = stored.findIndex((a: any) => a.profile?.id === userId);
         if (idx >= 0) {
