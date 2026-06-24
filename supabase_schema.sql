@@ -2192,9 +2192,77 @@ drop policy if exists "Admins can insert ip_logs" on public.ip_logs;
 create policy "Admins can insert ip_logs" on public.ip_logs
   for insert with check (true);
 
--- ====================================================================
+-- ════════════════════════════════════════════════════════════════════
+-- 15. ADMIN USER SEED (idempotent)
+-- ════════════════════════════════════════════════════════════════════
+-- Creates the admin auth user, profile, and admin_accounts entry.
+-- Requires pgcrypto extension (enabled by default in Supabase).
+-- ════════════════════════════════════════════════════════════════════
+
+do $$
+declare
+  v_admin_id uuid;
+  v_admin_email text := 'coinlootadmin@gmail.com';
+  v_admin_password text := 'Coinloot@#admin@#';
+  v_admin_username text := 'SuperAdmin';
+begin
+  -- Check if admin already exists in auth.users
+  select id into v_admin_id from auth.users where email = v_admin_email;
+
+  if v_admin_id is null then
+    -- Create auth user with confirmed email
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, confirmed_at, last_sign_in_at,
+      raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at,
+      confirmation_token, email_change, email_change_token_new, recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000',
+      gen_random_uuid(),
+      'authenticated',
+      'authenticated',
+      v_admin_email,
+      crypt(v_admin_password, gen_salt('bf')),
+      now(), now(), now(),
+      '{"provider":"email","providers":["email"]}',
+      jsonb_build_object('username', v_admin_username),
+      now(), now(),
+      '', '', '', ''
+    )
+    returning id into v_admin_id;
+
+    raise notice 'Admin auth user created: %', v_admin_id;
+  else
+    -- Update existing admin's password
+    update auth.users
+    set encrypted_password = crypt(v_admin_password, gen_salt('bf')),
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        updated_at = now()
+    where id = v_admin_id;
+
+    raise notice 'Admin auth user already exists: %', v_admin_id;
+  end if;
+
+  -- Create / update profile
+  insert into public.profiles (id, username, email, is_admin)
+  values (v_admin_id, v_admin_username, v_admin_email, true)
+  on conflict (id) do update set
+    is_admin = true,
+    username = v_admin_username;
+
+  -- Insert into admin_accounts
+  insert into public.admin_accounts (user_id, role)
+  values (v_admin_id, 'ADMIN')
+  on conflict (user_id) do nothing;
+
+  raise notice 'Admin profile and admin_accounts created/updated.';
+end;
+$$;
+
+-- ════════════════════════════════════════════════════════════════════
 -- SCHEMA PERMISSIONS — Grant access to Supabase roles
--- ====================================================================
+-- ════════════════════════════════════════════════════════════════════
 
 grant usage on schema public to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;
