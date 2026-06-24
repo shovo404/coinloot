@@ -6,7 +6,7 @@ import {
   Crown, Megaphone, Gift, Clock,
 } from "lucide-react";
 import { UserProfile, Offer } from "../types";
-import { isUserRestricted } from "../utils/vpnDetector";
+import { isUserRestricted, checkVpnStatus, getVpnSettings, logDetection } from "../utils/vpnDetector";
 import { getProviderInfo, getProviderLogoUrl, getAllProviders } from "../utils/providerLogos";
 import OfferwallCard from "./OfferwallCard";
 import { isDeveloperMode } from "./DeveloperModeBanner";
@@ -14,6 +14,7 @@ import { getConnectedProviders, fetchOffersFromProvider } from "../utils/fetchOf
 import { playCoinSound } from "../utils/coinSound";
 import HorizontalScroll from "./HorizontalScroll";
 import SurveyHub from "./SurveyHub";
+import VpnBlockPopup from "./VpnBlockPopup";
 import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
 import LockedOfferwallCard from "./LockedOfferwallCard";
 
@@ -104,6 +105,8 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const [viewingOffer, setViewingOffer] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [apiOffers, setApiOffers] = useState<Offer[]>([]);
+  const [vpnBlockedOfferwall, setVpnBlockedOfferwall] = useState(false);
+  const [vpnCheckingOffer, setVpnCheckingOffer] = useState(false);
   const restriction = isUserRestricted(user.id);
   const isRestricted = restriction.restricted;
 
@@ -143,7 +146,11 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
       } catch {}
     };
     window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+    window.addEventListener("homepage-sections-changed", handler);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.removeEventListener("homepage-sections-changed", handler);
+    };
   }, []);
 
   // Auto-fetch offers from connected offerwall providers
@@ -213,8 +220,31 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
     onRewardEarned(0, providerName, `Launched ${providerName} offerwall`);
   };
 
-  const handleLaunchOffer = (offer: Offer) => {
+  const handleLaunchOffer = async (offer: Offer) => {
     if (isDeveloperMode()) { alert("Offers are temporarily disabled — site under development."); return; }
+
+    // ── KYC Check ──
+    if (user.kyc_required && user.kyc_status !== "APPROVED") {
+      alert("KYC verification is required before completing offers. Please complete KYC verification first.");
+      return;
+    }
+
+    // ── Offerwall VPN Protection ──
+    const settings = getVpnSettings();
+    if (settings.offerwallBlock) {
+      setVpnCheckingOffer(true);
+      try {
+        const vpnResult = await checkVpnStatus();
+        logDetection(user.id, user.username, vpnResult);
+        if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
+          setVpnBlockedOfferwall(true);
+          setVpnCheckingOffer(false);
+          return;
+        }
+      } catch { /* allow through */ }
+      setVpnCheckingOffer(false);
+    }
+
     setViewingOffer(offer);
   };
 
@@ -655,6 +685,50 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VPN Checking Overlay ── */}
+      {vpnCheckingOffer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md">
+          <div className="flex items-center gap-3 p-6 bg-slate-950 border border-cyan-500/20 rounded-2xl">
+            <Zap className="w-5 h-5 text-cyan-400 animate-spin" />
+            <span className="text-sm text-slate-300 font-mono">Verifying network security...</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── VPN Block Fullscreen ── */}
+      {vpnBlockedOfferwall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-xl">
+          <div className="max-w-md mx-4 text-center">
+            <div className="mb-6 w-20 h-20 mx-auto rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center">
+              <ShieldCheck className="w-10 h-10 text-rose-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Access Blocked</h2>
+            <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+              VPN, proxy, or TOR detected. Please disable it and try again to access offers.
+            </p>
+            <button onClick={async () => {
+              setVpnBlockedOfferwall(false);
+              const settings = getVpnSettings();
+              if (settings.offerwallBlock) {
+                setVpnCheckingOffer(true);
+                try {
+                  const vpnResult = await checkVpnStatus();
+                  logDetection(user.id, user.username, vpnResult);
+                  if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
+                    setVpnBlockedOfferwall(true);
+                    setVpnCheckingOffer(false);
+                    return;
+                  }
+                } catch { /* */ }
+                setVpnCheckingOffer(false);
+              }
+            }} className="px-6 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-bold hover:scale-[1.02] transition-all cursor-pointer">
+              Try Again
+            </button>
           </div>
         </div>
       )}

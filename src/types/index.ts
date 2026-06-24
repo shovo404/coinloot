@@ -12,6 +12,8 @@ export interface UserProfile {
   total_earned_coins: number;
   total_withdrawn_usd: number;
   kyc_status: 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
+  kyc_required: boolean;
+  registration_ip?: string;
   is_admin: boolean;
   admin_role?: 'ADMIN';
   vpn_detected: boolean;

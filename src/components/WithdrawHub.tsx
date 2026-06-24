@@ -6,6 +6,8 @@ import {
 import { UserProfile, WithdrawalRequest } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { notifyWithdrawalRequest } from "../utils/adminNotifier";
+import { checkVpnStatus, getVpnSettings, isUserRestricted, restrictUser, logDetection } from "../utils/vpnDetector";
+import { calcLevelFromBalance } from "../utils/levelSystem";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -153,6 +155,8 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
   const [amountInput, setAmountInput] = useState("1000");
   const [withdrawingState, setWithdrawingState] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [vpnBlocked, setVpnBlocked] = useState(false);
+  const [vpnChecking, setVpnChecking] = useState(false);
 
   // ── Derived values ──
   const usdValue = coinsToUsd(amountCoins);
@@ -162,6 +166,12 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
   const validate = (): ValidationError[] => {
     const errors: ValidationError[] = [];
     if (!selectedMethod) return errors;
+
+    // ── KYC Check ──
+    if (user.kyc_required && user.kyc_status !== "APPROVED") {
+      errors.push({ field: "account", message: "KYC verification is required before withdrawal. Please complete KYC verification first." });
+      return errors;
+    }
 
     if (!targetAccountInput.trim()) {
       errors.push({ field: "account", message: `${selectedMethod.fieldLabel} is required.` });
@@ -217,13 +227,30 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
   };
 
   // ── Submit ──
-  const handleCreateWithdrawalSubmit = (e: React.FormEvent) => {
+  const handleCreateWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMethod) return;
 
     const errors = validate();
     setValidationErrors(errors);
     if (errors.length > 0) return;
+
+    // ── VPN Protection Check ──
+    const settings = getVpnSettings();
+    if (settings.withdrawalBlock) {
+      setVpnChecking(true);
+      try {
+        const vpnResult = await checkVpnStatus();
+        logDetection(user.id, user.username, vpnResult);
+        if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
+          restrictUser(user.id, 30, "VPN detected during withdrawal request");
+          setVpnBlocked(true);
+          setVpnChecking(false);
+          return;
+        }
+      } catch { /* server check failed — allow through */ }
+      setVpnChecking(false);
+    }
 
     setWithdrawingState(true);
 
@@ -234,7 +261,8 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
         ...user,
         balance_coins: finalCoins,
         balance_usd: finalCoins / 1000,
-        total_withdrawn_usd: user.total_withdrawn_usd + usdValue
+        total_withdrawn_usd: user.total_withdrawn_usd + usdValue,
+        level: calcLevelFromBalance(finalCoins)
       });
 
       const newWd: WithdrawalRequest = {
@@ -267,7 +295,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
   const hasEnoughBalance = amountCoins <= user.balance_coins;
   const meetsMinimum = selectedMethod ? amountCoins >= selectedMethod.minCoins : true;
   const devMode = isDeveloperMode();
-  const canSubmit = !devMode && selectedMethod && targetAccountInput.trim() && amountCoins > 0 && hasEnoughBalance && meetsMinimum;
+  const canSubmit = !devMode && selectedMethod && targetAccountInput.trim() && amountCoins > 0 && hasEnoughBalance && meetsMinimum && !vpnBlocked;
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -531,6 +559,25 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
                   <span className="text-emerald-400 font-mono text-sm font-bold">${usdValue.toFixed(2)} USD</span>
                 </div>
               </div>
+
+              {/* ── VPN Block Notice ── */}
+              {vpnBlocked && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-[10px] text-rose-300 leading-normal flex gap-2 items-start">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block text-rose-200 mb-0.5">VPN Detected</span>
+                    <span>Withdrawals are blocked while connected to a VPN, proxy, or TOR. Please disable and try again.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── VPN Checking Loader ── */}
+              {vpnChecking && (
+                <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-[10px] text-cyan-300 leading-normal flex gap-2 items-center">
+                  <Wallet className="w-4 h-4 animate-spin" />
+                  <span>Verifying network security...</span>
+                </div>
+              )}
 
               {/* ── Balance Warning ── */}
               {!hasEnoughBalance && amountCoins > 0 && (

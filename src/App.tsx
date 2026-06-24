@@ -6,8 +6,8 @@ import { playCoinSound, playNotificationSound } from "./utils/coinSound";
 import RewardPopup, { usePopupQueue } from "./components/RewardPopup";
 import LevelUpCelebration from "./components/LevelUpCelebration";
 import KycUploadPage from "./components/KycUploadPage";
-import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult } from "./utils/vpnDetector";
-import { calcLevel } from "./utils/levelSystem";
+import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnSettings } from "./utils/vpnDetector";
+import { calcLevel, calcLevelFromBalance } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 
 import AnimatedBackground from "./components/AnimatedBackground";
@@ -208,9 +208,18 @@ export default function App() {
   useEffect(() => {
     if (userProfile && !profileLoadedRef.current) {
       profileLoadedRef.current = true;
-      prevLevelRef.current = calcLevel(userProfile.total_earned_coins);
+      prevLevelRef.current = calcLevelFromBalance(userProfile.balance_coins);
     }
   }, [userProfile]);
+
+  // ── Recalculate level from current balance on mount & balance change ──
+  useEffect(() => {
+    if (!userProfile) return;
+    const correctLevel = calcLevelFromBalance(userProfile.balance_coins);
+    if (userProfile.level !== correctLevel) {
+      setUserProfile(prev => prev ? { ...prev, level: correctLevel } : prev);
+    }
+  }, [userProfile?.balance_coins]);
 
   // ── Reward popup queue ──
   const { popups: rewardPopups, addPopup, dismissPopup } = usePopupQueue();
@@ -358,7 +367,7 @@ export default function App() {
         balance_coins: newCoins,
         balance_usd: newCoins / 1000,
         total_earned_coins: newTotalEarned,
-        level: calcLevel(newTotalEarned),
+        level: calcLevelFromBalance(newCoins),
       };
     });
 
@@ -387,7 +396,7 @@ export default function App() {
     const newUser = userProfile;
     if (newUser) {
       const newTotal = newUser.total_earned_coins + coins;
-      const newLevel = calcLevel(newTotal);
+      const newLevel = calcLevelFromBalance(newUser.balance_coins + coins);
       if (newLevel > oldLevel) {
         setLevelUpLevel(newLevel);
         setShowLevelUp(true);
@@ -441,12 +450,15 @@ export default function App() {
             return updated;
           });
 
-          // User notification
-          addNotification(
-            "VPN Detected!",
-            "Our system detected a VPN or proxy connection. Please disable it immediately to continue using the platform.",
-            "security"
-          );
+          // User notification (only if VPN warning setting is enabled)
+          const settings = getVpnSettings();
+          if (settings.vpnWarning) {
+            addNotification(
+              "VPN Detected!",
+              "Our system detected a VPN or proxy connection. Please disable it immediately to continue using the platform.",
+              "security"
+            );
+          }
 
         }
       } else {

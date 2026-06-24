@@ -42,6 +42,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "tickets", label: "Tickets", icon: MessageSquare },
   { id: "homepage", label: "Homepage", icon: Globe },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "rewards-challenges", label: "Rewards & Challenges", icon: Award },
   { id: "kyc", label: "KYC", icon: ShieldCheck },
   { id: "database", label: "Database", icon: Server },
   { id: "security", label: "Security", icon: ShieldAlert },

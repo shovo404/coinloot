@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus } from "luc
 import { UserProfile } from "../types";
 import { notifyRegistration } from "../utils/adminNotifier";
 import { sendTelegramNotification } from "../utils/telegramNotify";
+import { getSupabaseClient } from "../lib/supabase";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -60,6 +61,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             total_earned_coins: 0,
             total_withdrawn_usd: 0,
             kyc_status: "APPROVED",
+            kyc_required: false,
             is_admin: true,
             admin_role: "ADMIN",
             vpn_detected: false,
@@ -74,8 +76,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
           localStorage.setItem("coinloot_accounts", JSON.stringify(parsed));
         }
         return parsed;
-      }
-      // First run — create admin account
+      }          // First run — create admin account
       const adminProfile: UserProfile = {
         id: `u-admin-${Math.random().toString(36).substring(2, 10)}`,
         username: "SuperAdmin",
@@ -90,6 +91,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         total_earned_coins: 0,
         total_withdrawn_usd: 0,
         kyc_status: "APPROVED",
+        kyc_required: false,
         is_admin: true,
         admin_role: "ADMIN",
         vpn_detected: false,
@@ -209,6 +211,25 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     }
 
     // Create new profile
+    let regIp = "";
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipData = await ipRes.json();
+      regIp = ipData.ip || "";
+    } catch { /* */ }
+
+    // Check IP account limit
+    const ipLimitSettings = JSON.parse(localStorage.getItem("coinloot_ip_limit_settings") || '{"enabled":false,"maxAccounts":3}');
+    if (ipLimitSettings.enabled && regIp) {
+      const allProfiles: UserProfile[] = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
+      const accountsWithSameIp = allProfiles.filter(p => p.registration_ip === regIp).length;
+      if (accountsWithSameIp >= ipLimitSettings.maxAccounts) {
+        setError(`Maximum ${ipLimitSettings.maxAccounts} accounts allowed per IP address. You already have ${accountsWithSameIp} account(s).`);
+        setLoading(false);
+        return;
+      }
+    }
+
     const newProfile: UserProfile = {
       id: `u-${Math.random().toString(36).substring(2, 10)}`,
       username: trimmedUsername,
@@ -223,6 +244,8 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       total_earned_coins: 0,
       total_withdrawn_usd: 0,
       kyc_status: "NOT_STARTED",
+      kyc_required: false,
+      registration_ip: regIp,
       is_admin: false,
       vpn_detected: false,
       device_fingerprint: `GPU-WEBGL-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
@@ -241,6 +264,32 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     const existingProfiles = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
     existingProfiles.push(newProfile);
     localStorage.setItem("coinloot_user_profiles", JSON.stringify(existingProfiles));
+
+    // Save to Supabase profiles table if configured
+    try {
+      const sb = getSupabaseClient();
+      if (sb) {
+        sb.from("profiles").insert({
+          id: newProfile.id,
+          username: newProfile.username,
+          email: newProfile.email,
+          full_name: newProfile.username,
+          country: newProfile.country || "",
+          avatar_url: "",
+          balance_coins: 0,
+          level: 1,
+          total_earned_coins: 0,
+          kyc_status: "NOT_STARTED",
+          created_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.warn("Supabase profile insert failed:", error.message);
+        });
+      }
+    } catch (e) {
+      console.warn("Supabase not available, skipping profile insert");
+    }
+
+    window.dispatchEvent(new CustomEvent("user-registered"));
 
     notifyRegistration(newProfile.id, trimmedUsername, trimmedEmail, "", password);
 

@@ -2,6 +2,14 @@ export function calcLevel(totalCoins: number): number {
   return Math.floor(totalCoins / 1000) + 1;
 }
 
+/**
+ * Calculate level based on current balance (not total earned).
+ * Level 1 at 0 coins, every 1000 coins = +1 level.
+ */
+export function calcLevelFromBalance(balanceCoins: number): number {
+  return Math.floor(Math.max(0, balanceCoins) / 1000);
+}
+
 export function coinsForLevel(level: number): { min: number; max: number } {
   return { min: Math.max(0, (level - 1) * 1000), max: level * 1000 };
 }
@@ -35,6 +43,7 @@ export function getLevelTitle(level: number): string {
     "Platinum Pioneer", "Diamond Hunter", "Elite Trader", "Master Investor",
     "Legendary Tycoon", "Cosmic Mogul",
   ];
+  if (level <= 0) return titles[0];
   if (level <= titles.length) return titles[level - 1];
   return `Galactic Titan Lv.${level}`;
 }

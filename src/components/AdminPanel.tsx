@@ -10,13 +10,20 @@ import {
   Calendar, UserPlus, ExternalLink, MoreHorizontal, HardDrive, Signal, Circle,
   Sun, Moon, List, LayoutGrid, ArrowUpRight, ArrowDownRight, Gauge, Mail, History,
   ArrowLeft, MessageSquare, ChevronRight, User,
-  Megaphone,
+  Megaphone, Database,
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, SiteSettings, WithdrawalMethodConfig } from "../types";
 import { Ticket } from "./SupportTicket";
 import { playCoinSound } from "../utils/coinSound";
-import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry } from "../utils/vpnDetector";
+import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs } from "../utils/vpnDetector";
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
+import { getSupabaseClient } from "../lib/supabase";
+import { 
+  getSocialBountyConfig, saveSocialBountyConfig, 
+  getWeeklyChallengeConfig, saveWeeklyChallengeConfig, 
+  resetSocialBountyToDefaults, resetWeeklyChallengeToDefaults,
+  SocialBountyConfig, WeeklyChallengeConfig 
+} from "../utils/rewardsConfig";
 
 interface AdminPanelProps {
   user: UserProfile;
@@ -413,6 +420,247 @@ const AdminBackBtn = ({ onClick }: { onClick: () => void }) => (
 const getAccounts = (): StoredAccount[] => { try { return JSON.parse(localStorage.getItem("coinloot_accounts") || "[]"); } catch { return []; } };
 const saveAccounts = (accounts: StoredAccount[]) => localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
 
+// ── Data Browser: browse Supabase tables inline ──
+
+// ── Rewards & Challenges Management ──
+function RewardsChallengesManagement() {
+  const [subSection, setSubSection] = useState("overview");
+  const [bountyConfig, setBountyConfig] = useState(getSocialBountyConfig);
+  const [challengeConfig, setChallengeConfig] = useState(getWeeklyChallengeConfig);
+
+  const saveBounty = () => {
+    saveSocialBountyConfig(bountyConfig);
+    alert("Social Bounty settings saved!");
+  };
+
+  const saveChallenge = () => {
+    saveWeeklyChallengeConfig(challengeConfig);
+    alert("Weekly Challenge settings saved!");
+  };
+
+  const levelOptions = [1, 2, 3, 5, 10, 15, 20];
+  const rewardPresets = [100, 500, 1000, 5000];
+
+  // ── Landing / Overview page ──
+  if (subSection === "overview") {
+    return (
+      <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+        <h1 className="text-xl lg:text-2xl font-bold text-white">Rewards & Challenges Management</h1>
+        <p className="text-[10px] text-slate-400 font-mono">Configure social bounty campaigns and the weekly elite challenge chest.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button onClick={() => setSubSection("social-bounty")} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 hover:border-cyan-500/20 transition-all text-left group cursor-pointer">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+              <Award className="w-5 h-5 text-white" />
+            </div>
+            <h3 className="text-sm font-bold text-white mb-1">Social Bounty Campaign Settings</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Enable/disable, set rewards, level requirements, and configure social bounty networks.</p>
+          </button>
+          <button onClick={() => setSubSection("weekly-challenge")} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 hover:border-purple-500/20 transition-all text-left group cursor-pointer">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+              <Trophy className="w-5 h-5 text-white" />
+            </div>
+            <h3 className="text-sm font-bold text-white mb-1">Weekly Elite Challenge Settings</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Enable/disable, set reward coins, bonus coins, level requirements, and weekly reset rules.</p>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (subSection === "social-bounty") {
+    return (
+      <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+        <AdminBackBtn onClick={() => setSubSection("overview")} />
+        <h1 className="text-xl lg:text-2xl font-bold text-white">Social Bounty Campaign Settings</h1>
+        <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-white">Enable Feature</h3>
+            <button onClick={() => setBountyConfig({...bountyConfig, enabled: !bountyConfig.enabled})} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${bountyConfig.enabled ? "bg-cyan-500" : "bg-slate-700"}`}>
+              <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: bountyConfig.enabled ? "calc(100% - 18px)" : "2px" }} />
+            </button>
+          </div>
+          {bountyConfig.enabled && (
+            <>
+              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Title</label><input value={bountyConfig.title} onChange={(e) => setBountyConfig({...bountyConfig, title: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Description</label><textarea value={bountyConfig.description} onChange={(e) => setBountyConfig({...bountyConfig, description: e.target.value})} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" /></div>
+              <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Icon (emoji)</label><input value={bountyConfig.icon} onChange={(e) => setBountyConfig({...bountyConfig, icon: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="e.g. Sparkles, 🐦" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] text-slate-500 uppercase block mb-1">Reward Coins</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {rewardPresets.map((p) => (
+                      <button key={p} onClick={() => setBountyConfig({...bountyConfig, reward_coins: p})} className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-all cursor-pointer ${bountyConfig.reward_coins === p ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "bg-slate-800 text-slate-400 border border-white/5 hover:border-cyan-500/20"}`}>{p}</button>
+                    ))}
+                    <input type="number" value={bountyConfig.reward_coins} onChange={(e) => setBountyConfig({...bountyConfig, reward_coins: parseInt(e.target.value) || 0})} className="w-20 bg-slate-950 border border-white/5 rounded-xl px-2 py-1 text-[9px] font-mono text-white" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[9px] text-slate-500 uppercase block mb-1">Max Reward Limit</label>
+                  <input type="number" value={bountyConfig.max_reward_limit} onChange={(e) => setBountyConfig({...bountyConfig, max_reward_limit: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Min. Level Requirement</label>
+                <div className="flex gap-2 flex-wrap">
+                  {levelOptions.map((l) => (
+                    <button key={l} onClick={() => setBountyConfig({...bountyConfig, required_level: l})} className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-all cursor-pointer ${bountyConfig.required_level === l ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-800 text-slate-400 border border-white/5 hover:border-amber-500/20"}`}>Level {l}+</button>
+                  ))}
+                  <input type="number" value={bountyConfig.required_level} onChange={(e) => setBountyConfig({...bountyConfig, required_level: parseInt(e.target.value) || 1})} className="w-16 bg-slate-950 border border-white/5 rounded-xl px-2 py-1 text-[9px] font-mono text-white" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-mono">Active</span>
+                <button onClick={() => setBountyConfig({...bountyConfig, active: !bountyConfig.active})} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${bountyConfig.active ? "bg-emerald-500" : "bg-slate-700"}`}>
+                  <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: bountyConfig.active ? "calc(100% - 18px)" : "2px" }} />
+                </button>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={saveBounty} className="flex-1 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer">Save Settings</button>
+                <button onClick={() => { setBountyConfig(resetSocialBountyToDefaults()); }} className="px-4 py-2.5 rounded-2xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-semibold hover:border-white/20 transition-all cursor-pointer">Reset to Default</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Weekly Elite Challenge Settings ──
+  return (
+    <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+      <AdminBackBtn onClick={() => setSubSection("overview")} />
+      <h1 className="text-xl lg:text-2xl font-bold text-white">Weekly Elite Challenge Settings</h1>
+      <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-sm text-white">Enable Feature</h3>
+          <button onClick={() => setChallengeConfig({...challengeConfig, enabled: !challengeConfig.enabled})} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${challengeConfig.enabled ? "bg-cyan-500" : "bg-slate-700"}`}>
+            <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: challengeConfig.enabled ? "calc(100% - 18px)" : "2px" }} />
+          </button>
+        </div>
+        {challengeConfig.enabled && (
+          <>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Title</label><input value={challengeConfig.title} onChange={(e) => setChallengeConfig({...challengeConfig, title: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Description</label><textarea value={challengeConfig.description} onChange={(e) => setChallengeConfig({...challengeConfig, description: e.target.value})} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Icon (emoji)</label><input value={challengeConfig.icon} onChange={(e) => setChallengeConfig({...challengeConfig, icon: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="e.g. Trophy, 🏆" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Reward Coins</label>
+                <div className="flex gap-2 flex-wrap">
+                  {rewardPresets.map((p) => (
+                    <button key={p} onClick={() => setChallengeConfig({...challengeConfig, reward_coins: p})} className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-all cursor-pointer ${challengeConfig.reward_coins === p ? "bg-purple-500/10 text-purple-400 border border-purple-500/20" : "bg-slate-800 text-slate-400 border border-white/5 hover:border-purple-500/20"}`}>{p}</button>
+                  ))}
+                  <input type="number" value={challengeConfig.reward_coins} onChange={(e) => setChallengeConfig({...challengeConfig, reward_coins: parseInt(e.target.value) || 0})} className="w-20 bg-slate-950 border border-white/5 rounded-xl px-2 py-1 text-[9px] font-mono text-white" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Bonus Coins</label>
+                <input type="number" value={challengeConfig.bonus_coins} onChange={(e) => setChallengeConfig({...challengeConfig, bonus_coins: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Required Level</label>
+                <div className="flex gap-2 flex-wrap">
+                  {levelOptions.map((l) => (
+                    <button key={l} onClick={() => setChallengeConfig({...challengeConfig, required_level: l})} className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-all cursor-pointer ${challengeConfig.required_level === l ? "bg-purple-500/10 text-purple-400 border border-purple-500/20" : "bg-slate-800 text-slate-400 border border-white/5 hover:border-purple-500/20"}`}>Level {l}+</button>
+                  ))}
+                  <input type="number" value={challengeConfig.required_level} onChange={(e) => setChallengeConfig({...challengeConfig, required_level: parseInt(e.target.value) || 1})} className="w-16 bg-slate-950 border border-white/5 rounded-xl px-2 py-1 text-[9px] font-mono text-white" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Required Tasks</label>
+                <input type="number" value={challengeConfig.required_tasks} onChange={(e) => setChallengeConfig({...challengeConfig, required_tasks: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+              </div>
+            </div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Completion Conditions</label><textarea value={challengeConfig.completion_conditions} onChange={(e) => setChallengeConfig({...challengeConfig, completion_conditions: e.target.value})} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Weekly Reset Rules</label><input value={challengeConfig.weekly_reset_rules} onChange={(e) => setChallengeConfig({...challengeConfig, weekly_reset_rules: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400 font-mono">Active</span>
+              <button onClick={() => setChallengeConfig({...challengeConfig, active: !challengeConfig.active})} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${challengeConfig.active ? "bg-emerald-500" : "bg-slate-700"}`}>
+                <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: challengeConfig.active ? "calc(100% - 18px)" : "2px" }} />
+              </button>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={saveChallenge} className="flex-1 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer">Save Settings</button>
+              <button onClick={() => { setChallengeConfig(resetWeeklyChallengeToDefaults()); }} className="px-4 py-2.5 rounded-2xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-semibold hover:border-white/20 transition-all cursor-pointer">Reset to Default</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const DB_TABLES = ["profiles", "users", "withdrawals", "offerwall_providers", "offers", "promo_codes", "support_tickets", "kyc_records", "admin_logs", "admin_notifications", "site_settings"];
+function DataBrowserCard() {
+  const [selectedTable, setSelectedTable] = useState("profiles");
+  const [tableData, setTableData] = useState<any[] | null>(null);
+  const [loadingTable, setLoadingTable] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sb = getSupabaseClient();
+    if (!sb) { setDbError("Supabase not configured"); setTableData(null); setLoadingTable(false); return; }
+    setDbError(null);
+    setLoadingTable(true);
+    setTableData(null);
+    sb.from(selectedTable).select("*").limit(50).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setDbError(error.message); setTableData(null); }
+      else { setTableData(data || []); }
+      setLoadingTable(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedTable]);
+
+  if (!getSupabaseClient()) return null;
+
+  return (
+    <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3">
+      <h3 className="font-bold text-sm text-white flex items-center gap-2"><Database className="w-4 h-4 text-cyan-400" /> Data Browser</h3>
+      <p className="text-[10px] text-slate-400 font-mono">Browse table contents directly from Supabase (max 50 rows).</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select value={selectedTable} onChange={(e) => setSelectedTable(e.target.value)} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-1.5 text-[10px] font-mono text-white">
+          {DB_TABLES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <span className="text-[9px] text-slate-500 font-mono">
+          {loadingTable ? "Loading..." : dbError ? "Error" : `${tableData?.length || 0} rows`}
+        </span>
+        {dbError && <span className="text-[9px] text-rose-400 font-mono">{dbError}</span>}
+      </div>
+      <div className="overflow-x-auto max-h-48 overflow-y-auto border border-white/5 rounded-xl">
+        {tableData && tableData.length > 0 ? (
+          <table className="w-full text-[8px] font-mono">
+            <thead>
+              <tr className="bg-slate-900/80">
+                {Object.keys(tableData[0]).map((col) => (
+                  <th key={col} className="px-2 py-1.5 text-left text-slate-400 font-semibold whitespace-nowrap">{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableData.map((row, ri) => (
+                <tr key={ri} className="border-t border-white/5 hover:bg-white/[0.02]">
+                  {Object.values(row).map((val: any, ci: number) => (
+                    <td key={ci} className="px-2 py-1 text-slate-300 truncate max-w-[120px]" title={typeof val === "string" ? val : JSON.stringify(val)}>
+                      {val === null ? <span className="text-slate-600">NULL</span> : typeof val === "object" ? JSON.stringify(val).slice(0, 40) : String(val).slice(0, 40)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : tableData && tableData.length === 0 ? (
+          <p className="text-center text-slate-500 py-4 text-[10px]">No data in this table.</p>
+        ) : loadingTable ? (
+          <p className="text-center text-slate-500 py-4 text-[10px]">Loading...</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPanel({ user, onRewardEarned, activeSection: externalSection, onSectionChange }: AdminPanelProps) {
   const [internalSection, setInternalSection] = useState("dashboard");
   const activeSection = externalSection || internalSection;
@@ -451,6 +699,16 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     return { featured: true, hot: true, surveys: true, offerwalls: true };
   };
   const [homepageSections, setHomepageSections] = useState(loadHomepageSections);
+
+  // Re-read homepage sections from localStorage when section changes to "homepage"
+  useEffect(() => {
+    if (activeSection === "homepage") {
+      setHomepageSections(loadHomepageSections());
+    }
+  }, [activeSection]);
+
+  // ── VPN Protection Settings ──
+  const [vpnSettings, setVpnSettings] = useState(getVpnSettings);
 
   // ── Locked Offers Rules State ──
   const [rules, setRules] = useState<{ id: string; name: string; type: string; value: number }[]>(() => {
@@ -543,6 +801,22 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [telegramEnabled, setTelegramEnabled] = useState(() => {
     try { const c = JSON.parse(localStorage.getItem("coinloot_telegram_config") || "{}"); return c.enabled !== false; } catch { return true; }
   });
+
+  // ── IP Account Limit Settings ──
+  const [ipLimitEnabled, setIpLimitEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_ip_limit_settings") || '{"enabled":false,"maxAccounts":3}').enabled; } catch { return false; }
+  });
+  const [ipLimitMax, setIpLimitMax] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_ip_limit_settings") || '{"enabled":false,"maxAccounts":3}').maxAccounts; } catch { return 3; }
+  });
+
+  const saveIpLimitSettings = (enabled: boolean, maxAccounts: number) => {
+    localStorage.setItem("coinloot_ip_limit_settings", JSON.stringify({ enabled, maxAccounts }));
+    setIpLimitEnabled(enabled);
+    setIpLimitMax(maxAccounts);
+    addLog("IP_LIMIT_SETTINGS_UPDATED", "settings", "ip-limit", `IP account limit ${enabled ? "enabled" : "disabled"}, max ${maxAccounts} accounts per IP`);
+    showNotif("success", `IP account limit ${enabled ? "enabled" : "disabled"}`);
+  };
 
   // ── Database Config State ──
   const [dbProjectName, setDbProjectName] = useState(() => {
@@ -646,7 +920,59 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [restrictNote, setRestrictNote] = useState("");
   const [countdownTick, setCountdownTick] = useState(Date.now());
   const [profilesRefreshKey, setProfilesRefreshKey] = useState(0);
+
+  // Re-read accounts from localStorage when storage changes (cross-tab) or on focus
+  useEffect(() => {
+    const handler = () => setProfilesRefreshKey((k) => k + 1);
+    window.addEventListener("storage", handler);
+    window.addEventListener("focus", handler);
+    window.addEventListener("user-registered", handler);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.removeEventListener("focus", handler);
+      window.removeEventListener("user-registered", handler);
+    };
+  }, []);
   useEffect(() => { const i = setInterval(() => setCountdownTick(Date.now()), 1000); return () => clearInterval(i); }, []);
+
+  // ── Supabase Profiles Sync ──
+  const [supabaseProfiles, setSupabaseProfiles] = useState<UserProfile[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const sb = getSupabaseClient();
+        if (!sb) { if (!cancelled) setSupabaseProfiles([]); return; }
+        const { data, error } = await sb.from("profiles").select("*");
+        if (error) { console.warn("Supabase profiles load failed:", error.message); return; }
+        if (!cancelled && data) {
+          const mapped: UserProfile[] = data.map((r: any) => ({
+            id: r.id || "",
+            username: r.username || r.full_name || "User",
+            email: r.email || "",
+            balance_coins: r.balance_coins || 0,
+            balance_usd: (r.balance_coins || 0) / 1000,
+            xp: 0,
+            level: r.level || 1,
+            streak_days: 0,
+            referred_by: null,
+            referrals_count: 0,
+            total_earned_coins: r.total_earned_coins || 0,
+            total_withdrawn_usd: 0,
+            kyc_status: r.kyc_status || "NOT_STARTED",
+            kyc_required: r.kyc_required ?? false,
+            is_admin: false,
+            vpn_detected: false,
+            device_fingerprint: "",
+            country: r.country || "",
+          }));
+          setSupabaseProfiles(mapped);
+        }
+      } catch { if (!cancelled) setSupabaseProfiles([]); }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [profilesRefreshKey]);
 
   // ── Tickets State ──
   const [ticketSelected, setTicketSelected] = useState<any | null>(null);
@@ -717,9 +1043,22 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // ── Data from localStorage ──
+  // ── Data from localStorage + Supabase ──
   const accounts = useMemo(() => getAccounts(), [activeSection, profilesRefreshKey]);
-  const profiles = useMemo(() => accounts.map((a) => a.profile), [accounts]);
+
+  // Merge localStorage profiles with Supabase profiles (deduplicate by id)
+  const profiles = useMemo(() => {
+    const local = accounts.map((a) => a.profile);
+    const seen = new Set(local.map((p) => p.id));
+    const merged = [...local];
+    for (const sp of supabaseProfiles) {
+      if (!seen.has(sp.id)) {
+        merged.push(sp);
+        seen.add(sp.id);
+      }
+    }
+    return merged;
+  }, [accounts, supabaseProfiles]);
   const withdrawals = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("coinloot_withdrawals_v3") || "[]") as WithdrawalRequest[]; } catch { return []; }
   }, [activeSection]);
@@ -851,6 +1190,25 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     setProfilesRefreshKey((k) => k + 1);
     addLog("USER_UPDATED", "user", targetId, `Updated profile: ${Object.keys(updates).join(", ")}`);
     showNotif("success", "User profile updated");
+  };
+
+  // ── KYC Required Toggle ──
+  const handleToggleKycRequired = (userId: string, username: string, required: boolean) => {
+    const stored = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
+    const idx = stored.findIndex((p: any) => p.id === userId);
+    if (idx >= 0) {
+      stored[idx].kyc_required = required;
+      localStorage.setItem("coinloot_user_profiles", JSON.stringify(stored));
+    }
+    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const acctIdx = accounts.findIndex((a: any) => a.profile?.id === userId);
+    if (acctIdx >= 0) {
+      accounts[acctIdx].profile.kyc_required = required;
+      localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
+    }
+    setProfilesRefreshKey((k) => k + 1);
+    addLog("KYC_REQUIRED_TOGGLE", "user", userId, `${required ? "Enabled" : "Disabled"} KYC mandatory for ${username}`);
+    showNotif("success", `KYC ${required ? "mandatory" : "optional"} for ${username}`);
   };
 
   // ── Withdrawal Management ──
@@ -1061,6 +1419,41 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               </div>
             ))}
           </div>
+
+          {/* ── VPN Security Stats ── */}
+          {(() => {
+            const vpnLogs = getDetectionHistory();
+            const vpnDetectedCount = vpnLogs.filter(l => l.detectionType !== "clean").length;
+            const flaggedUsers = new Set(vpnLogs.filter(l => l.detectionType !== "clean").map(l => l.userId)).size;
+            const highRiskCount = vpnLogs.filter(l => l.fraudScore >= 70).length;
+            return (
+              <div className="bg-slate-950/30 p-4 lg:p-5 rounded-3xl border border-white/5 backdrop-blur-xl">
+                <div className="flex items-center gap-2 mb-4">
+                  <Shield className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="text-[10px] font-bold font-mono text-rose-400 uppercase tracking-widest">VPN Threat Intelligence</span>
+                  <span className="ml-auto text-[8px] font-mono text-slate-500">{vpnLogs.length} scans</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-2xl bg-rose-500/5 border border-rose-500/10 p-3 text-center">
+                    <span className="text-lg font-bold font-mono text-rose-400">{vpnDetectedCount}</span>
+                    <span className="text-[8px] text-slate-500 font-mono block mt-0.5">VPN Detections</span>
+                  </div>
+                  <div className="rounded-2xl bg-orange-500/5 border border-orange-500/10 p-3 text-center">
+                    <span className="text-lg font-bold font-mono text-orange-400">{flaggedUsers}</span>
+                    <span className="text-[8px] text-slate-500 font-mono block mt-0.5">Flagged Users</span>
+                  </div>
+                  <div className="rounded-2xl bg-amber-500/5 border border-amber-500/10 p-3 text-center">
+                    <span className="text-lg font-bold font-mono text-amber-400">{highRiskCount}</span>
+                    <span className="text-[8px] text-slate-500 font-mono block mt-0.5">High Risk (≥70)</span>
+                  </div>
+                  <div className="rounded-2xl bg-emerald-500/5 border border-emerald-500/10 p-3 text-center">
+                    <span className="text-lg font-bold font-mono text-emerald-400">{vpnLogs.length - vpnDetectedCount}</span>
+                    <span className="text-[8px] text-slate-500 font-mono block mt-0.5">Clean IPs</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── QUICK ACTIONS ── */}
           <div className="bg-slate-950/30 p-4 lg:p-5 rounded-3xl border border-white/5 backdrop-blur-xl">
@@ -1390,6 +1783,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setEditingUserId(p.id); setEditCoins(p.balance_coins); setEditUsd(p.balance_usd); }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20" title="Edit Wallet"><Coins className="w-3 h-3" /></button>
                               <button onClick={() => { setRestrictModal({ userId: p.id, username: p.username }); setRestrictDuration(30); setRestrictDays(0); setRestrictHours(0); setRestrictMinutes(30); setRestrictSeconds(0); setRestrictReason(""); setRestrictNote(""); }} className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20" title="Restrict"><Clock className="w-3 h-3" /></button>
+                              <button onClick={() => handleToggleKycRequired(p.id, p.username, !p.kyc_required)} className={`p-1.5 rounded-lg border ${p.kyc_required ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20' : 'bg-slate-800/60 text-slate-400 border-white/5 hover:border-purple-500/20 hover:text-purple-400'}`} title={p.kyc_required ? "KYC Mandatory (click to disable)" : "Make KYC Mandatory"}><ShieldCheck className="w-3 h-3" /></button>
                               {p.vpn_detected ? (
                                 <button onClick={() => handleUnbanUser(p.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20" title="Unban"><UserCheck className="w-3 h-3" /></button>
                               ) : (
@@ -2598,6 +2992,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       const logs = getLogs();
       const fraudUsers = profiles.filter((p) => p.vpn_detected);
       const restrictedUsers = getRestrictedUsers();
+      const ipLogs = getUserIpLogs(100);
 
       const getTimeRemaining = (until: string) => {
         const diff = new Date(until).getTime() - Date.now();
@@ -2607,11 +3002,89 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         return `${m}m ${s}s`;
       };
 
+      const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
+        const updated = { ...vpnSettings, [key]: !vpnSettings[key] };
+        setVpnSettings(updated);
+        saveVpnSettings(updated);
+        showNotif("success", `VPN ${key === "vpnWarning" ? "Warning" : key === "offerwallBlock" ? "Offerwall Block" : "Withdrawal Block"} ${updated[key] ? "enabled" : "disabled"}`);
+      };
+
       return (
         <div className="p-4 lg:p-6 space-y-4">
           <AdminBackBtn onClick={goBack} />
           <h1 className="text-xl lg:text-2xl font-bold text-white">Security</h1>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+
+            {/* ── VPN Protection Settings ── */}
+            {section !== "logs" && section !== "vpn-control" && (
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+                <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" /> VPN Protection</h3>
+                <div className="space-y-3">
+                  {[
+                    { key: "vpnWarning" as const, label: "VPN Warning", desc: "Show warning when VPN detected" },
+                    { key: "offerwallBlock" as const, label: "Offerwall Block", desc: "Block offerwall access when VPN detected" },
+                    { key: "withdrawalBlock" as const, label: "Withdrawal Block", desc: "Block withdrawal requests when VPN detected" },
+                  ].map(({ key, label, desc }) => (
+                    <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-slate-900/40 border border-white/5">
+                      <div>
+                        <span className="text-xs font-semibold text-white">{label}</span>
+                        <p className="text-[8px] text-slate-500 mt-0.5">{desc}</p>
+                      </div>
+                      <button onClick={() => toggleVpnSetting(key)} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${vpnSettings[key] ? "bg-cyan-500" : "bg-slate-700"}`}>
+                        <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: vpnSettings[key] ? "calc(100% - 18px)" : "2px" }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── IP Logs ── */}
+            {section !== "fraud" && section !== "vpn-control" && (
+              <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+                <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Globe className="w-4 h-4 text-emerald-400" /> IP Logs <span className="text-[9px] text-slate-500 font-mono ml-auto">{ipLogs.length} entries</span></h3>
+                <div className="overflow-x-auto max-h-64 overflow-y-auto border border-white/5 rounded-xl">
+                  <table className="w-full text-[8px] font-mono">
+                    <thead>
+                      <tr className="bg-slate-900/80">
+                        <th className="px-2 py-1.5 text-left text-slate-400">User</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">IP</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">Country</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">ISP</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">VPN</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">Risk</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">Last Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ipLogs.map((entry) => (
+                        <tr key={entry.id} className="border-t border-white/5 hover:bg-white/[0.02]">
+                          <td className="px-2 py-1 text-white">{entry.username}</td>
+                          <td className="px-2 py-1 text-slate-300">{entry.ipAddress}</td>
+                          <td className="px-2 py-1 text-slate-300">{entry.country || "-"}</td>
+                          <td className="px-2 py-1 text-slate-300 truncate max-w-[80px]">{entry.isp || "-"}</td>
+                          <td className="px-2 py-1">
+                            <span className={`px-1 py-0.5 rounded text-[7px] font-bold ${entry.proxyDetected ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+                              {entry.proxyDetected ? "YES" : "NO"}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1">
+                            <span className={`font-bold ${entry.riskScore >= 80 ? "text-rose-400" : entry.riskScore >= 50 ? "text-amber-400" : "text-slate-400"}`}>
+                              {entry.riskScore}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1 text-slate-500 text-[7px]">{new Date(entry.lastSeen).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      {ipLogs.length === 0 && (
+                        <tr><td colSpan={7} className="text-center text-slate-500 py-4 text-[10px]">No IP logs yet</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {section !== "logs" && (
               <>
                 <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
@@ -2686,6 +3159,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         const updated = { ...homepageSections, [key]: !homepageSections[key] };
         setHomepageSections(updated);
         localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
+        window.dispatchEvent(new CustomEvent("homepage-sections-changed"));
         showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
       };
       const sectionMeta: { key: string; label: string; icon: any; desc: string }[] = [
@@ -2740,7 +3214,13 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
-    // ═══ SETTINGS ═══
+    
+    // ═══ REWARDS & CHALLENGES ═══
+    if (section === "rewards-challenges") {
+      return <RewardsChallengesManagement />;
+    }
+
+// ═══ SETTINGS ═══
     if (section === "settings") {
       return (
         <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
@@ -2775,6 +3255,32 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               </button>
             </div>
           </div>
+
+          {/* ── IP Account Limit Settings ── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" /> IP Account Limit</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Limit how many accounts can be created from a single IP address.</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-white">Enable IP Limit</span>
+              <button onClick={() => saveIpLimitSettings(!ipLimitEnabled, ipLimitMax)} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${ipLimitEnabled ? "bg-cyan-500" : "bg-slate-700"}`}>
+                <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: ipLimitEnabled ? "calc(100% - 18px)" : "2px" }} />
+              </button>
+            </div>
+            {ipLimitEnabled && (
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase block mb-1">Max Accounts Per IP</label>
+                <div className="flex items-center gap-2">
+                  <input type="number" min={1} max={100} value={ipLimitMax} onChange={(e) => {
+                    const v = Math.max(1, parseInt(e.target.value) || 1);
+                    setIpLimitMax(v);
+                    saveIpLimitSettings(ipLimitEnabled, v);
+                  }} className="w-24 bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                  <span className="text-[10px] text-slate-500 font-mono">accounts</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
             <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Settings className="w-4 h-4 text-amber-400" /> Developer Mode</h3>
             <div className="flex items-center justify-between">
@@ -2820,9 +3326,52 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
             <h3 className="font-bold text-sm text-white flex items-center gap-2"><FileText className="w-4 h-4 text-violet-400" /> Database Setup SQL</h3>
             <p className="text-[10px] text-slate-400 font-mono">Copy and run this SQL in your Supabase SQL Editor to create all required tables.</p>
             <div className="relative" id="db-setup-sql">
-              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-64 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
+              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-96 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
 {`-- CoinLoot Database Tables
+-- Safe to re-run — uses IF NOT EXISTS / DROP IF EXISTS
 -- Run this in your Supabase SQL Editor
+
+-- Drop existing policies first (safe re-run)
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Users can view own profile" ON users;
+  DROP POLICY IF EXISTS "Admins can read all users" ON users;
+  DROP POLICY IF EXISTS "Users can update own profile" ON users;
+  DROP POLICY IF EXISTS "Admins can read vpn_detection_logs" ON vpn_detection_logs;
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
+
+-- Enable RLS on tables (safe, IF EXISTS)
+ALTER TABLE IF EXISTS vpn_detection_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS users ENABLE ROW LEVEL SECURITY;
+
+-- Recreate policies (wrapped in DO blocks to safely handle "already exists")
+DO $$ BEGIN
+  CREATE POLICY IF NOT EXISTS "Users can view own profile"
+    ON users FOR SELECT
+    USING (auth.uid()::text = id OR (SELECT is_admin FROM users WHERE id = auth.uid()::text) = true);
+EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY IF NOT EXISTS "Admins can read all users"
+    ON users FOR SELECT
+    USING (true);
+EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY IF NOT EXISTS "Users can update own profile"
+    ON users FOR UPDATE
+    USING (auth.uid()::text = id);
+EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY IF NOT EXISTS "Admins can read vpn_detection_logs"
+    ON vpn_detection_logs FOR SELECT
+    USING (true);
+EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
+END $$;
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -2944,16 +3493,107 @@ CREATE TABLE IF NOT EXISTS kyc_records (
   submitted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- User IP Logs (VPN/Proxy detection records)
+CREATE TABLE IF NOT EXISTS user_ip_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  ip_address TEXT,
+  country TEXT,
+  city TEXT,
+  isp TEXT,
+  proxy_detected BOOLEAN DEFAULT FALSE,
+  proxy_type TEXT,
+  risk_score INT DEFAULT 0,
+  last_seen TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Site settings
 CREATE TABLE IF NOT EXISTS site_settings (
   key TEXT PRIMARY KEY,
   value JSONB
+);
+
+-- Rewards & Challenges configuration
+CREATE TABLE IF NOT EXISTS reward_configs (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );`}</pre>
               <button onClick={() => { navigator.clipboard.writeText(document.querySelector("#db-setup-sql pre")?.textContent || ""); showNotif("success", "SQL copied to clipboard!"); }} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all cursor-pointer" title="Copy SQL">
                 <Copy className="w-3 h-3" />
               </button>
             </div>
           </div>
+
+          {/* ── Query SQL (Read Data) ── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-3">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-400" /> Query SQL — Read All Data</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Copy and run these SELECT queries in your Supabase SQL Editor to browse data.</p>
+            <div className="relative" id="db-query-sql">
+              <pre className="bg-slate-950 rounded-xl p-4 text-[9px] font-mono text-slate-300 overflow-x-auto max-h-80 overflow-y-auto border border-white/5 leading-relaxed whitespace-pre">
+{`-- ============================================
+-- CoinLoot Data Viewer Queries
+-- Run any of these in Supabase SQL Editor
+-- ============================================
+
+-- 1. All Users
+SELECT * FROM users ORDER BY created_at DESC;
+
+-- 2. All Withdrawals
+SELECT * FROM withdrawals ORDER BY created_at DESC;
+
+-- 3. All Offerwall Providers
+SELECT * FROM offerwall_providers;
+
+-- 4. All Offers
+SELECT * FROM offers ORDER BY created_at DESC;
+
+-- 5. All Promo Codes
+SELECT * FROM promo_codes;
+
+-- 6. All Support Tickets
+SELECT * FROM support_tickets ORDER BY created_at DESC;
+
+-- 7. All KYC Records
+SELECT * FROM kyc_records;
+
+-- 8. All Admin Logs
+SELECT * FROM admin_logs ORDER BY timestamp DESC;
+
+-- 9. All Admin Notifications
+SELECT * FROM admin_notifications ORDER BY created_at DESC;
+
+-- 10. All Withdrawal Methods
+SELECT * FROM withdrawal_methods;
+
+-- 11. Site Settings
+SELECT * FROM site_settings;
+
+-- 12. Users with KYC (joined)
+SELECT u.id, u.username, u.email, u.kyc_status, k.doc_type, k.status as kyc_doc_status
+FROM users u
+LEFT JOIN kyc_records k ON u.id = k.user_id
+ORDER BY u.created_at DESC;
+
+-- 13. Dashboard Summary
+SELECT
+  (SELECT COUNT(*) FROM users) as total_users,
+  (SELECT COUNT(*) FROM withdrawals) as total_withdrawals,
+  (SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING') as pending_withdrawals,
+  (SELECT COUNT(*) FROM support_tickets WHERE status = 'open') as open_tickets,
+  (SELECT COUNT(*) FROM kyc_records WHERE status = 'PENDING') as pending_kyc,
+  COALESCE((SELECT SUM(total_earned_coins) FROM users), 0) as total_coins_earned,
+  COALESCE((SELECT SUM(usd_value) FROM withdrawals WHERE status IN ('APPROVED','PAID')), 0) as total_withdrawn_usd;`}</pre>
+              <button onClick={() => { navigator.clipboard.writeText(document.querySelector("#db-query-sql pre")?.textContent || ""); showNotif("success", "Query SQL copied!"); }} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all cursor-pointer" title="Copy SQL">
+                <Copy className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+
+          {/* ── Data Browser (inline) ── */}
+          <DataBrowserCard />
+
           <button onClick={saveSettings} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-xs border border-cyan-500/20 hover:from-cyan-500/30 hover:to-purple-600/30 transition-all">
             Save All Settings
           </button>

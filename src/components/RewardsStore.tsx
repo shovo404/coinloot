@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Sparkles, Gift, Flame, Trophy, Coins, CheckCircle, Bell, ArrowRight, Twitter, 
   Send as TelegramIcon, ShieldCheck, Mail, Calendar, Trash
@@ -6,6 +6,11 @@ import {
 import { UserProfile } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { playCoinSound } from "../utils/coinSound";
+import { 
+  getSocialBountyConfig, getWeeklyChallengeConfig, 
+  checkLevelRequirement,
+  SocialBountyConfig, WeeklyChallengeConfig 
+} from "../utils/rewardsConfig";
 
 interface RewardsStoreProps {
   user: UserProfile;
@@ -44,6 +49,21 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
   ]);
 
   const [weeklyClaimed, setWeeklyClaimed] = useState(false);
+
+  // ── Load admin-driven configs with real-time sync ──
+  const [bountyConfig, setBountyConfig] = useState<SocialBountyConfig>(getSocialBountyConfig);
+  const [challengeConfig, setChallengeConfig] = useState<WeeklyChallengeConfig>(getWeeklyChallengeConfig);
+
+  useEffect(() => {
+    const onBountyChange = (e: CustomEvent) => setBountyConfig(e.detail);
+    const onChallengeChange = (e: CustomEvent) => setChallengeConfig(e.detail);
+    window.addEventListener("social-bounty-changed", onBountyChange as EventListener);
+    window.addEventListener("weekly-challenge-changed", onChallengeChange as EventListener);
+    return () => {
+      window.removeEventListener("social-bounty-changed", onBountyChange as EventListener);
+      window.removeEventListener("weekly-challenge-changed", onChallengeChange as EventListener);
+    };
+  }, []);
 
   // Claim Streak handler
   const claimStreakDay = (dayIndex: number) => {
@@ -205,14 +225,18 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
   const claimWeeklyChest = () => {
     if (isDeveloperMode()) return;
     if (weeklyClaimed) return;
-    if (user.level < 2) {
-      alert("Error: Weekly Elite Chest requires at least Clearance Level 2. Complete surveys and tasks to leveling up!");
+    
+    const levelCheck = checkLevelRequirement(user.level, challengeConfig.required_level);
+    if (!levelCheck.passed) {
+      alert(`Error: ${levelCheck.message} Complete surveys and tasks to level up!`);
       return;
     }
 
     setWeeklyClaimed(true);
-    const payout = 1000;
-    const newCoins = user.balance_coins + payout;
+    const payout = challengeConfig.reward_coins;
+    const bonusPayout = challengeConfig.bonus_coins;
+    const totalPayout = payout + bonusPayout;
+    const newCoins = user.balance_coins + totalPayout;
     const newXp = user.xp + 250;
 
     setUser({
@@ -221,17 +245,22 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
       balance_usd: newCoins / 1000,
       xp: newXp,
       level: Math.floor(newXp / 1000) + 1,
-      total_earned_coins: user.total_earned_coins + payout
+      total_earned_coins: user.total_earned_coins + totalPayout
     });
 
     playCoinSound();
-    onRewardEarned(payout, "Weekly Elite Chest", "Weekly elite chest opened! +1,000 coins credited.");
-    alert("Chest unlocked! Gained +1,000 Coins and premium orbital badges!");
+    onRewardEarned(totalPayout, "Weekly Elite Chest", `Weekly elite chest opened! +${totalPayout.toLocaleString()} coins credited.`);
+    alert(`Chest unlocked! Gained +${totalPayout.toLocaleString()} Coins and premium orbital badges!`);
   };
 
   // Claim Social reward
   const claimSocialBounty = (rewardId: string, payout: number, name: string) => {
     if (isDeveloperMode()) return;
+    const levelCheck = checkLevelRequirement(user.level, bountyConfig.required_level);
+    if (!levelCheck.passed) {
+      alert(`Error: ${levelCheck.message}`);
+      return;
+    }
     const isDone = socialRewards.find(r => r.id === rewardId)?.completed;
     if (isDone) return;
 
@@ -364,26 +393,27 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         </div>
 
         {/* Weekly Elite chest */}
+        {challengeConfig.enabled && challengeConfig.active && (
         <div className="glass rounded-3xl p-6 flex flex-col justify-between space-y-6">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="font-sans font-bold text-base text-white flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-purple-400" />
-                Weekly Elite Challenge Chest
+                {challengeConfig.title}
               </h3>
               <span className="p-1 px-1.5 rounded bg-purple-500/10 text-purple-300 font-mono text-[8px] font-bold">
-                LEVEL 2+ REQUIRED
+                LEVEL {challengeConfig.required_level}+ REQUIRED
               </span>
             </div>
             <p className="text-slate-400 text-xs leading-relaxed">
-              Active clearance players of Clearance Level 2 or higher can decrypt this chest once every calendar week. Guarantees large coin payouts.
+              {challengeConfig.description}
             </p>
           </div>
 
           <div className="p-4 bg-gradient-to-r from-purple-950/20 to-pink-950/10 border border-purple-500/10 rounded-2xl flex items-center justify-between">
             <div>
               <span className="text-[10px] font-mono text-slate-400 uppercase">chest potential payout</span>
-              <span className="text-lg font-bold font-mono text-white mt-1 block">1,000 Coins (~$1.00 Value)</span>
+              <span className="text-lg font-bold font-mono text-white mt-1 block">{challengeConfig.reward_coins.toLocaleString()} Coins (+{challengeConfig.bonus_coins} Bonus)</span>
             </div>
 
             <button
@@ -400,20 +430,22 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
           </div>
 
           <p className="text-[10px] font-mono text-slate-500">
-            Note: Clearance levels are earned by completing GemiAds custom offers and surveys.
+            {challengeConfig.weekly_reset_rules}
           </p>
         </div>
+        )}
       </div>
 
       {/* Social community Bounties */}
+      {bountyConfig.enabled && bountyConfig.active && (
       <div className="glass rounded-3xl p-6 lg:p-8 space-y-5">
         <div>
           <h3 className="font-sans font-bold text-base text-white flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-yellow-400" />
-            Social bounty campaign networks
+            {bountyConfig.title}
           </h3>
           <p className="text-slate-400 text-xs mt-1">
-            Connect to Coin Loot global channels. Follow profiles, verify connection vectors, and capture free tokens!
+            {bountyConfig.description}
           </p>
         </div>
 
@@ -430,7 +462,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
               <div className="flex items-start justify-between mb-4">
                 <span className="text-2.5xl filter drop-shadow-[0_0_6px_rgba(255,255,255,0.1)]">{reward.icon}</span>
                 <span className="px-2 py-0.5 text-[8px] font-mono tracking-widest font-bold bg-white/5 rounded border border-white/15 text-white">
-                  +{reward.payout} Coins
+                  +{bountyConfig.reward_coins} Coins
                 </span>
               </div>
 
@@ -447,7 +479,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
                 <button
                   type="button"
                   disabled={reward.completed}
-                  onClick={() => claimSocialBounty(reward.id, reward.payout, reward.name)}
+                  onClick={() => claimSocialBounty(reward.id, bountyConfig.reward_coins, reward.name)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                     reward.completed
                       ? "text-emerald-400 bg-emerald-500/10 font-medium"
@@ -471,6 +503,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }

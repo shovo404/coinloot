@@ -44,6 +44,72 @@ export interface RestrictionHistoryEntry {
   timestamp: string;
 }
 
+// ── User IP Log (per-user IP tracking) ──
+
+export interface UserIpLog {
+  id: string;
+  userId: string;
+  username: string;
+  ipAddress: string;
+  country: string;
+  city: string;
+  isp: string;
+  proxyDetected: boolean;
+  proxyType: string;
+  riskScore: number;
+  lastSeen: string;
+  createdAt: string;
+}
+
+export function logUserIp(userId: string, username: string, result: VpnCheckResult): UserIpLog {
+  const entry: UserIpLog = {
+    id: `ipl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    userId,
+    username,
+    ipAddress: result.ip,
+    country: result.country,
+    city: result.city,
+    isp: result.isp,
+    proxyDetected: result.isVpn || result.isProxy || result.isTor || result.isHosting,
+    proxyType: result.detectionType,
+    riskScore: result.fraudScore,
+    lastSeen: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    const logs: UserIpLog[] = JSON.parse(localStorage.getItem("coinloot_user_ip_logs") || "[]");
+    logs.unshift(entry);
+    localStorage.setItem("coinloot_user_ip_logs", JSON.stringify(logs.slice(0, 1000)));
+  } catch { /* */ }
+  return entry;
+}
+
+export function getUserIpLogs(limit = 200): UserIpLog[] {
+  try {
+    return JSON.parse(localStorage.getItem("coinloot_user_ip_logs") || "[]").slice(0, limit);
+  } catch { return []; }
+}
+
+// ── VPN Protection Settings ──
+
+export interface VpnProtectionSettings {
+  vpnWarning: boolean;
+  offerwallBlock: boolean;
+  withdrawalBlock: boolean;
+}
+
+export function getVpnSettings(): VpnProtectionSettings {
+  try {
+    const saved = localStorage.getItem("coinloot_vpn_settings");
+    if (saved) return JSON.parse(saved);
+  } catch { /* */ }
+  return { vpnWarning: true, offerwallBlock: true, withdrawalBlock: true };
+}
+
+export function saveVpnSettings(settings: VpnProtectionSettings) {
+  localStorage.setItem("coinloot_vpn_settings", JSON.stringify(settings));
+}
+
 // ── Server-side VPN check ──
 
 export async function checkVpnStatus(): Promise<VpnCheckResult> {
@@ -145,6 +211,9 @@ export function logDetection(userId: string, username: string, result: VpnCheckR
       detectedAt: new Date().toISOString(),
     });
     localStorage.setItem("coinloot_vpn_logs", JSON.stringify(logs.slice(0, 500)));
+
+    // Also log to user_ip_logs
+    logUserIp(userId, username, result);
 
     // Also log server-side
     fetch("/api/vpn/log", {
