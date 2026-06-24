@@ -300,7 +300,7 @@ export default function AdminLayout({ user, onRewardEarned, onLogout, notificati
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden">
       {/* Mobile hamburger */}
-      <button onClick={() => setMobileSidebarOpen(true)} className="fixed top-3 left-3 z-50 lg:hidden p-2 rounded-lg bg-slate-900/80 border border-white/10 backdrop-blur-xl text-slate-400 cursor-pointer">
+      <button onClick={() => setMobileSidebarOpen(true)} className="fixed top-3 left-3 z-50 lg:hidden p-2.5 rounded-lg bg-slate-900/80 border border-white/10 backdrop-blur-xl text-slate-400 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center">
         <Menu className="w-4 h-4" />
       </button>
 

@@ -351,7 +351,7 @@ export default function Navbar({
               {/* Hamburger — for dashboard navigation menu */}
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-2 rounded-xl border border-white/5 bg-slate-900/40 text-white hover:bg-slate-900/80 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center"
+                className="p-2 rounded-xl border border-white/5 bg-slate-900/40 text-white hover:bg-slate-900/80 transition-all min-h-[44px] min-w-[44px] flex items-center justify-center"
                 aria-label="Open menu"
               >
                 {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
@@ -391,17 +391,17 @@ export default function Navbar({
                     <div className="bg-slate-900/60 p-3 rounded-xl text-center border border-white/5">
                       <Coins className="w-4 h-4 text-cyan-400 mx-auto mb-1" />
                       <span className="block text-xs font-bold text-white">{user.balance_coins.toLocaleString()}</span>
-                      <span className="text-[8px] text-slate-500 font-mono">Coins</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Coins</span>
                     </div>
                     <div className="bg-slate-900/60 p-3 rounded-xl text-center border border-white/5">
                       <Award className="w-4 h-4 text-purple-400 mx-auto mb-1" />
                       <span className="block text-xs font-bold text-white">LVL {user.level}</span>
-                      <span className="text-[8px] text-slate-500 font-mono">Level</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Level</span>
                     </div>
                     <div className="bg-slate-900/60 p-3 rounded-xl text-center border border-white/5">
                       <Bell className="w-4 h-4 text-cyan-400 mx-auto mb-1" />
                       <span className="block text-xs font-bold text-white">{unreadCount}</span>
-                      <span className="text-[8px] text-slate-500 font-mono">Unread</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Unread</span>
                     </div>
                   </div>
 

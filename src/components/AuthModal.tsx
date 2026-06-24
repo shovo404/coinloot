@@ -214,7 +214,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         className="w-full sm:max-w-md bg-slate-950 border border-white/10 sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden animate-slide-up sm:animate-zoom-in max-h-[90vh] sm:max-h-auto flex flex-col"
       >
         {/* Header */}
-        <div className="relative flex items-center justify-between p-6 pb-4 border-b border-white/5">
+        <div className="relative flex items-center justify-between p-4 sm:p-6 pb-4 border-b border-white/5">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-[0_0_12px_rgba(6,182,212,0.3)]">
               <Sparkles className="w-4 h-4 text-white" />
@@ -264,7 +264,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         </div>
 
         {/* Form */}
-        <form onSubmit={activeTab === "signin" ? handleSignIn : handleSignUp} className="p-6 pt-4 space-y-4">
+        <form onSubmit={activeTab === "signin" ? handleSignIn : handleSignUp} className="p-4 sm:p-6 pt-4 space-y-4 overflow-y-auto">
           {/* Username field (Sign Up only) */}
           {activeTab === "signup" && (
             <div className="space-y-1.5">

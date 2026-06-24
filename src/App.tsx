@@ -1098,7 +1098,7 @@ export default function App() {
                   <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
                 )}
               </div>
-              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "support-ticket" ? "text-cyan-400" : "text-slate-500"}`}>Support</span>
+              <span className={`text-[10px] font-bold tracking-wide ${activeTab === "support-ticket" ? "text-cyan-400" : "text-slate-500"}`}>Support</span>
             </button>
             <button
               onClick={() => setActiveTab("withdraw")}
@@ -1112,7 +1112,7 @@ export default function App() {
                   <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
                 )}
               </div>
-              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "withdraw" ? "text-cyan-400" : "text-slate-500"}`}>Withdraw</span>
+              <span className={`text-[10px] font-bold tracking-wide ${activeTab === "withdraw" ? "text-cyan-400" : "text-slate-500"}`}>Withdraw</span>
             </button>
             <div className="flex justify-center -mt-3">
               <button
@@ -1122,7 +1122,7 @@ export default function App() {
                 <div className="relative p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-600 shadow-[0_0_20px_rgba(6,182,212,0.35)] -translate-y-1">
                   <Zap className="w-6 h-6 text-white" />
                 </div>
-                <span className="text-[9px] font-bold tracking-wide text-cyan-400">Earn</span>
+                <span className="text-[10px] font-bold tracking-wide text-cyan-400">Earn</span>
               </button>
             </div>
             <button
@@ -1137,7 +1137,7 @@ export default function App() {
                   <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
                 )}
               </div>
-              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "rewards" ? "text-cyan-400" : "text-slate-500"}`}>Rewards</span>
+              <span className={`text-[10px] font-bold tracking-wide ${activeTab === "rewards" ? "text-cyan-400" : "text-slate-500"}`}>Rewards</span>
             </button>
             <button
               onClick={() => setActiveTab("leaderboard")}
@@ -1151,7 +1151,7 @@ export default function App() {
                   <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.5)]" />
                 )}
               </div>
-              <span className={`text-[9px] font-bold tracking-wide ${activeTab === "leaderboard" ? "text-cyan-400" : "text-slate-500"}`}>Leaderboard</span>
+              <span className={`text-[10px] font-bold tracking-wide ${activeTab === "leaderboard" ? "text-cyan-400" : "text-slate-500"}`}>Leaderboard</span>
             </button>
           </div>
         </nav>

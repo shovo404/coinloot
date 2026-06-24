@@ -288,8 +288,8 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{cat.label}</span>
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span>{cat.label}</span>
               </button>
             );
           })}

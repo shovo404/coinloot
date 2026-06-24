@@ -1,4 +1,4 @@
-import { useRef, useCallback, ReactNode, MouseEvent, TouchEvent } from "react";
+import { useRef, useCallback, ReactNode, MouseEvent } from "react";
 
 interface HorizontalScrollProps {
   children: ReactNode;
@@ -32,19 +32,6 @@ export default function HorizontalScroll({ children, className = "", snap = fals
     if (containerRef.current) containerRef.current.style.cursor = "";
   }, []);
 
-  const onTouchStart = useCallback((e: TouchEvent) => {
-    startX.current = e.touches[0].pageX - (containerRef.current?.offsetLeft || 0);
-    scrollLeft.current = containerRef.current?.scrollLeft || 0;
-  }, []);
-
-  const onTouchMove = useCallback((e: TouchEvent) => {
-    if (!containerRef.current) return;
-    e.preventDefault();
-    const x = e.touches[0].pageX - (containerRef.current.offsetLeft || 0);
-    const walk = x - startX.current;
-    containerRef.current.scrollLeft = scrollLeft.current - walk;
-  }, []);
-
   return (
     <div
       ref={containerRef}
@@ -53,8 +40,6 @@ export default function HorizontalScroll({ children, className = "", snap = fals
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
       style={{ cursor: "grab", scrollbarWidth: "none", msOverflowStyle: "none" }}
     >
       {children}
