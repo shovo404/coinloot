@@ -22,7 +22,6 @@ import ReferralsAffiliates from "./components/ReferralsAffiliates";
 import LeaderboardPodium from "./components/LeaderboardPodium";
 import OfferwallShowcase from "./components/OfferwallShowcase";
 import AdminLayout from "./components/AdminLayout";
-import AdminLogin from "./components/AdminLogin";
 import VpnBlockPopup from "./components/VpnBlockPopup";
 import RestrictionPage from "./components/RestrictionPage";
 import SurveyHub from "./components/SurveyHub";
@@ -105,13 +104,8 @@ export default function App() {
     'admin': '/admin',
   };
 
-  const initialPath = location.pathname;
-
   const [isDashboardView, setIsDashboardView] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("offers");
-  const [showAdminLogin, setShowAdminLogin] = useState(() => {
-    return initialPath === '/admin' || initialPath === '/admin/login';
-  });
 
   const [simulationCountry, setSimulationCountry] = useState<string>("BD");
 
@@ -166,7 +160,6 @@ export default function App() {
             console.log("[Auth] SIGNED_OUT received, clearing state");
             setUserProfile(null);
             setIsDashboardView(false);
-            setShowAdminLogin(false);
             setNotifications([]);
           }
         });
@@ -558,18 +551,6 @@ export default function App() {
     }
   }, []);
 
-  const handleAdminLogin = useCallback((email: string) => {
-    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-    const match = accounts.find((a: any) => a.email === email.toLowerCase().trim());
-    if (match && match.profile.is_admin) {
-      setUserProfile(match.profile);
-      setIsDashboardView(true);
-      setShowAdminLogin(false);
-    } else {
-      setIsAuthModalOpen(true);
-    }
-  }, []);
-
   const handleOpenAuth = () => setIsAuthModalOpen(true);
   const handleCloseAuth = () => setIsAuthModalOpen(false);
 
@@ -583,7 +564,6 @@ export default function App() {
   const handleLogout = async () => {
     setUserProfile(null);
     setIsDashboardView(false);
-    setShowAdminLogin(false);
     setNotifications([]);
     setWithdrawals([]);
     try {
@@ -630,15 +610,6 @@ export default function App() {
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
-
-  // Show admin login page (separate from user flow)
-  if (showAdminLogin && !userProfile) {
-    return (
-      <div className="relative w-full min-h-screen text-slate-100 font-sans bg-slate-950">
-        <AdminLogin onLogin={handleAdminLogin} />
-      </div>
-    );
-  }
 
   // If admin is logged in, show the dedicated admin layout
   if (userProfile && userProfile.is_admin && isDashboardView) {
@@ -1019,7 +990,7 @@ export default function App() {
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 text-[10px] font-mono text-slate-500">
                   <span>&copy; 2026-2027 CoinLoot Inc. All rights reserved.</span>
                   <div className="flex gap-4 items-center">
-                    <button onClick={() => setShowAdminLogin(true)} className="hover:text-cyan-400 transition-colors cursor-pointer">Admin</button>
+                    <button onClick={handleOpenAuth} className="hover:text-cyan-400 transition-colors cursor-pointer">Admin</button>
                     <span className="flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> SSL Secured</span>
                     <span className="flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> 256-bit Encrypted</span>
                   </div>
