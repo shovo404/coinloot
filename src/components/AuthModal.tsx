@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus } from "lucide-react";
 import { UserProfile } from "../types";
+import { getSupabaseClient } from "../lib/supabase";
 import { signUp, signIn, getProfile } from "../lib/supabaseService";
 
 interface StoredAccount { email: string; password: string; username: string; profile: UserProfile; }
@@ -94,6 +95,11 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         return;
       }
 
+      if (!getSupabaseClient()) {
+        setError("Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.");
+        setLoading(false);
+        return;
+      }
       const data = await signIn(trimmedEmail, password);
       if (data?.user) {
         const profile = await getProfile(data.user.id);
