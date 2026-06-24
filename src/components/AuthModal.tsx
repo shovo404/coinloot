@@ -2,7 +2,18 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus } from "lucide-react";
 import { UserProfile } from "../types";
 import { signUp, signIn, getProfile } from "../lib/supabaseService";
-import { getSupabaseClient } from "../lib/supabase";
+
+interface StoredAccount { email: string; password: string; username: string; profile: UserProfile; }
+
+function saveToAccounts(email: string, password: string, username: string, profile: UserProfile) {
+  const existing = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+  const idx = existing.findIndex((a: StoredAccount) => a.profile.id === profile.id);
+  const entry: StoredAccount = { email, password, username, profile };
+  if (idx >= 0) existing[idx] = entry;
+  else existing.push(entry);
+  localStorage.setItem("coinloot_accounts", JSON.stringify(existing));
+  window.dispatchEvent(new CustomEvent("user-registered"));
+}
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -84,9 +95,10 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       }
 
       const data = await signIn(trimmedEmail, password);
-      if (data.user) {
+      if (data?.user) {
         const profile = await getProfile(data.user.id);
         if (profile) {
+          saveToAccounts(trimmedEmail, password, profile.username, profile);
           onLogin(profile);
           onClose();
         } else {
@@ -135,14 +147,20 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     setLoading(true);
 
     try {
-      await signUp(trimmedEmail, password, trimmedUsername);
+      const signUpResult = await signUp(trimmedEmail, password, trimmedUsername);
+      if (!signUpResult) {
+        setError("Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.");
+        setLoading(false);
+        return;
+      }
 
       // Try auto sign-in after registration
       try {
         const data = await signIn(trimmedEmail, password);
-        if (data.user) {
+        if (data?.user) {
           const profile = await getProfile(data.user.id);
           if (profile) {
+            saveToAccounts(trimmedEmail, password, trimmedUsername, profile);
             setSuccessMsg("Account created successfully! Signing you in...");
             setTimeout(() => {
               onLogin(profile);

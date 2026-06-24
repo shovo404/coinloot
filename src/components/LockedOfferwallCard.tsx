@@ -77,20 +77,18 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
         style={{ aspectRatio: "3/4", minHeight: "320px", maxHeight: "400px" }}
       >
         {/* ── Background ── */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0a0e27] via-[#0d1235] to-[#120a2e] z-0" />
-        <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/[0.03] via-transparent to-purple-600/[0.03] z-0" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-1/2 bg-amber-500/[0.04] rounded-full blur-[80px] z-0" />
-
-        {/* Watermark Logo */}
-        {logoUrl && (
-          <div className="absolute inset-0 flex items-center justify-center z-0 pointer-events-none">
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          {logoUrl && (
             <img
               src={logoUrl}
               alt=""
-              className="w-[70%] h-[60%] object-contain opacity-[0.12] grayscale"
+              className="w-full h-full object-cover opacity-[0.2] scale-105"
             />
-          </div>
-        )}
+          )}
+          <div className="absolute inset-0 bg-gradient-to-br from-[#0a0e27]/90 via-[#0d1235]/85 to-[#120a2e]/90" />
+          <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/[0.06] via-transparent to-purple-600/[0.06]" />
+        </div>
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-1/2 bg-amber-500/[0.04] rounded-full blur-[80px] z-0 pointer-events-none" />
 
         {/* ── Top Section ── */}
         <div className="relative z-10 flex flex-col items-center pt-6 pb-4 px-5">

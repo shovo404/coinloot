@@ -198,6 +198,22 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
                   <span className="text-[10px] text-slate-300 font-mono">Promo Unlock</span>
                 </label>
               </div>
+              {/* Background Preview */}
+              {editConfig.logo && (
+                <div className="col-span-full">
+                  <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1.5">Background Preview</label>
+                  <div className="relative w-full max-w-[200px] aspect-[3/4] rounded-2xl overflow-hidden border border-white/10">
+                    <img src={editConfig.logo} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+                    <div className="absolute inset-0 bg-gradient-to-br from-[#0a0e27]/80 via-[#0d1235]/75 to-[#120a2e]/80" />
+                    <div className="relative z-10 flex flex-col items-center justify-center h-full gap-2 p-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
+                        <Lock className="w-4 h-4 text-amber-300" />
+                      </div>
+                      <span className="text-[9px] font-bold text-white/80 text-center leading-tight">{editConfig.title || editConfig.providerName}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={saveConfig} className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-emerald-600/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/20 hover:from-emerald-500/30 transition-all cursor-pointer flex items-center gap-1.5"><Save className="w-3 h-3" /> Save</button>

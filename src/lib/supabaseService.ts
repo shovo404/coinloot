@@ -5,7 +5,7 @@ import { UserProfile, WithdrawalRequest, PromoCode } from "../types";
 
 export async function signUp(email: string, password: string, username: string) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return null;
 
   const { data: authData, error: authError } = await sb.auth.signUp({
     email,
@@ -37,7 +37,7 @@ export async function signUp(email: string, password: string, username: string) 
 
 export async function signIn(email: string, password: string) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return null;
 
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
@@ -86,7 +86,7 @@ export async function updateProfile(
   updates: Partial<UserProfile>
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return;
 
   const dbUpdates: Record<string, any> = {};
   if (updates.username !== undefined) dbUpdates.username = updates.username;
@@ -158,11 +158,11 @@ export async function addCoins(
   description: string
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return null;
 
   // Get current profile
   const profile = await getProfile(userId);
-  if (!profile) throw new Error("User not found");
+  if (!profile) return null;
 
   const newBalance = profile.balance_coins + amount;
   const newTotalEarned = profile.total_earned_coins + amount;
@@ -221,11 +221,11 @@ export async function createWithdrawal(
   usdValue: number
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return null;
 
   // Deduct coins from profile
   const profile = await getProfile(userId);
-  if (!profile) throw new Error("User not found");
+  if (!profile) return null;
 
   const newBalance = profile.balance_coins - coinsAmount;
 
@@ -289,7 +289,7 @@ export async function updateWithdrawalStatus(
   adminId: string
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return;
 
   const { error } = await sb
     .from("withdrawals")
@@ -431,7 +431,7 @@ export async function createTicket(
   category: string
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return null;
 
   const { data, error } = await sb
     .from("support_tickets")
@@ -470,7 +470,7 @@ export async function submitKyc(
   selfieUrl: string
 ) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return;
 
   const { error } = await sb.from("kyc_records").insert({
     user_id: userId,
@@ -499,7 +499,7 @@ export async function getKycRecords(status?: string) {
 
 export async function updateKycStatus(recordId: string, status: string, userId: string) {
   const sb = getSupabaseClient();
-  if (!sb) throw new Error("Supabase not configured");
+  if (!sb) return;
 
   await sb.from("kyc_records").update({ status }).eq("id", recordId);
   await sb.from("profiles").update({ kyc_status: status }).eq("id", userId);

@@ -99,11 +99,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             </button>
           </form>
 
-          <div className="mt-6 p-3 rounded-xl bg-slate-950/50 border border-white/5">
-            <p className="text-[10px] text-slate-500 font-mono text-center">
-              Default: coinlootadmin@gmail.com / Coinloot@#admin@#
-            </p>
-          </div>
+
         </div>
       </div>
     </div>
