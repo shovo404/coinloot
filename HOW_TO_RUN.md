@@ -152,11 +152,27 @@ The full Supabase/PostgreSQL schema is in `supabase_schema.sql` (40+ tables, tri
 
 ### Admin Account in Production
 
-When using Supabase Auth:
-1. Create the admin user via Supabase Auth dashboard (or Auth API)
-2. A `profiles` table entry is auto-created on auth signup (the `profiles` table uses DEFAULT values, so all balances start at 0)
-3. Manually set `is_admin = true` and `admin_role = 'ADMIN'` in the `profiles` table
-4. Insert into `admin_accounts` table to link the auth user with admin privileges
+**Option A — One-command seed script (recommended):**
+```bash
+# 1. Add SUPABASE_SERVICE_ROLE_KEY to .env (get it from Supabase Dashboard → Settings → API)
+# 2. Run:
+npx tsx scripts/seed-admin.ts
+```
+
+**Option B — Manual setup via Supabase Dashboard:**
+1. Go to **Authentication → Users → Add User**
+2. Create user: `coinlootadmin@gmail.com` / `Coinloot@#admin@#`
+3. Go to **SQL Editor** and run:
+```sql
+INSERT INTO public.profiles (id, username, email, is_admin)
+SELECT id, 'SuperAdmin', email, true
+FROM auth.users WHERE email = 'coinlootadmin@gmail.com'
+ON CONFLICT (id) DO UPDATE SET is_admin = true;
+
+INSERT INTO public.admin_accounts (user_id, role)
+SELECT id, 'ADMIN' FROM auth.users WHERE email = 'coinlootadmin@gmail.com'
+ON CONFLICT (user_id) DO NOTHING;
+```
 
 ---
 
