@@ -104,6 +104,8 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         } else {
           setError("Account not found. Please contact support.");
         }
+      } else {
+        setError("Sign in failed. Please check your credentials or try again.");
       }
     } catch (err: any) {
       const msg = err?.message || "";

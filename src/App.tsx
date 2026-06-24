@@ -517,8 +517,15 @@ export default function App() {
   }, []);
 
   const handleAdminLogin = useCallback((email: string) => {
-    // Admin login through Supabase Auth handled by AuthModal
-    setIsAuthModalOpen(true);
+    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const match = accounts.find((a: any) => a.email === email.toLowerCase().trim());
+    if (match && match.profile.is_admin) {
+      setUserProfile(match.profile);
+      setIsDashboardView(true);
+      setShowAdminLogin(false);
+    } else {
+      setIsAuthModalOpen(true);
+    }
   }, []);
 
   const handleOpenAuth = () => setIsAuthModalOpen(true);
