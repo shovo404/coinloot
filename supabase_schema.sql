@@ -2216,7 +2216,8 @@ begin
       email_confirmed_at, confirmed_at, last_sign_in_at,
       raw_app_meta_data, raw_user_meta_data,
       created_at, updated_at,
-      confirmation_token, email_change, email_change_token_new, recovery_token
+      confirmation_token, email_change, email_change_token_new, recovery_token,
+      is_sso_user, is_anonymous
     ) values (
       '00000000-0000-0000-0000-000000000000',
       gen_random_uuid(),
@@ -2228,11 +2229,23 @@ begin
       '{"provider":"email","providers":["email"]}',
       jsonb_build_object('username', v_admin_username),
       now(), now(),
-      '', '', '', ''
+      '', '', '', '',
+      false, false
     )
     returning id into v_admin_id;
 
-    raise notice 'Admin auth user created: %', v_admin_id;
+    -- Insert identity for email/password login
+    insert into auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+    values (
+      v_admin_id,
+      v_admin_id,
+      jsonb_build_object('sub', v_admin_id, 'email', v_admin_email),
+      'email',
+      v_admin_email,
+      now(), now(), now()
+    );
+
+    raise notice 'Admin auth user and identity created: %', v_admin_id;
   else
     -- Update existing admin's password
     update auth.users
