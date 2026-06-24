@@ -1247,12 +1247,26 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   const getLogs = (): AdminLog[] => { try { return JSON.parse(localStorage.getItem("coinloot_admin_logs") || "[]"); } catch { return []; } };
 
-  const addUserNotification = (userId: string, title: string, description: string, category: string, coins?: number) => {
+  const addUserNotification = async (userId: string, title: string, description: string, category: string, coins?: number) => {
     try {
       const notifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
       notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, title, description, time: new Date().toISOString(), category, unread: true, coinsEarned: coins });
       localStorage.setItem("coinloot_notifications", JSON.stringify(notifs));
     } catch { /* */ }
+    // Also write to Supabase notifications table for real-time sync
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        await sb.from("notifications").insert({
+          user_id: userId,
+          title,
+          description,
+          notification_type: coins ? "admin_credit" : "system",
+          coins_earned: coins || null,
+          source_name: "Admin",
+        });
+      } catch {}
+    }
   };
 
   const handleAddCoins = async (targetId: string, amount: number, reason: string) => {
@@ -1264,7 +1278,11 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         const result = await addCoins(targetId, amount, "ADMIN_CREDIT", "Admin Credit", reason || "Admin credit");
         if (result) {
           addLog("COIN_ADDED", "user", targetId, `Added ${amount} coins. Reason: ${reason}`);
-          addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
+          await addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
+          if (targetId === user.id) {
+            playCoinSound();
+            if (onRewardEarned) onRewardEarned(amount, "Admin Credit", `Admin added ${amount.toLocaleString()} coins to your account.`);
+          }
           showNotif("success", `Added ${amount} coins to user`);
           setProfilesRefreshKey(k => k + 1);
           return;
