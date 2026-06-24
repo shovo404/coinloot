@@ -1255,7 +1255,23 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     } catch { /* */ }
   };
 
-  const handleAddCoins = (targetId: string, amount: number, reason: string) => {
+  const handleAddCoins = async (targetId: string, amount: number, reason: string) => {
+    // Try Supabase first
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        const { addCoins } = await import("../lib/supabaseService");
+        const result = await addCoins(targetId, amount, "ADMIN_CREDIT", "Admin Credit", reason || "Admin credit");
+        if (result) {
+          addLog("COIN_ADDED", "user", targetId, `Added ${amount} coins. Reason: ${reason}`);
+          addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
+          showNotif("success", `Added ${amount} coins to user`);
+          setProfilesRefreshKey(k => k + 1);
+          return;
+        }
+      } catch {}
+    }
+    // Fallback to localStorage
     const accs = getAccounts();
     const idx = accs.findIndex((a) => a.profile.id === targetId);
     if (idx === -1) return showNotif("error", "User not found");
@@ -1264,7 +1280,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     accs[idx].profile.balance_usd = accs[idx].profile.balance_coins / 1000;
     saveAccounts(accs);
     addLog("COIN_ADDED", "user", targetId, `Added ${amount} coins. Reason: ${reason}`);
-    // Notify the target user
     addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
     if (targetId === user.id) {
       const saved = localStorage.getItem("coinloot_profile_v3");
@@ -1275,14 +1290,31 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         p.balance_usd = p.balance_coins / 1000;
         localStorage.setItem("coinloot_profile_v3", JSON.stringify(p));
       }
-      // Sound + popup for self
       playCoinSound();
       if (onRewardEarned) onRewardEarned(amount, "Admin Credit", `Admin added ${amount.toLocaleString()} coins to your account.`);
     }
     showNotif("success", `Added ${amount} coins to user`);
   };
 
-  const handleDeductCoins = (targetId: string, amount: number, reason: string) => {
+  const handleDeductCoins = async (targetId: string, amount: number, reason: string) => {
+    // Try Supabase first
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        const profile = await sb.from("profiles").select("balance_coins").eq("id", targetId).maybeSingle();
+        if (profile.data) {
+          const deduct = Math.min(amount, profile.data.balance_coins);
+          const newBalance = profile.data.balance_coins - deduct;
+          await sb.from("profiles").update({ balance_coins: newBalance, balance_usd: newBalance / 1000 }).eq("id", targetId);
+          addLog("COIN_DEDUCTED", "user", targetId, `Deducted ${deduct} coins. Reason: ${reason}`);
+          addUserNotification(targetId, `${deduct.toLocaleString()} Coins Deducted`, `${deduct.toLocaleString()} coins were deducted. Reason: ${reason || "Admin adjustment"}`, "system");
+          showNotif("success", `Deducted ${deduct} coins from user`);
+          setProfilesRefreshKey(k => k + 1);
+          return;
+        }
+      } catch {}
+    }
+    // Fallback to localStorage
     const accs = getAccounts();
     const idx = accs.findIndex((a) => a.profile.id === targetId);
     if (idx === -1) return showNotif("error", "User not found");
@@ -1304,7 +1336,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", `Deducted ${deduct} coins from user`);
   };
 
-  const handleBanUser = (targetId: string, reason: string) => {
+  const handleBanUser = async (targetId: string, reason: string) => {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        await sb.from("profiles").update({ is_banned: true }).eq("id", targetId);
+        addLog("USER_BANNED", "user", targetId, `Banned user. Reason: ${reason}`);
+        showNotif("success", "User banned");
+        setProfilesRefreshKey(k => k + 1);
+        return;
+      } catch {}
+    }
     const accs = getAccounts();
     const idx = accs.findIndex((a) => a.profile.id === targetId);
     if (idx === -1) return showNotif("error", "User not found");
@@ -1314,7 +1356,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", "User banned");
   };
 
-  const handleUnbanUser = (targetId: string) => {
+  const handleUnbanUser = async (targetId: string) => {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        await sb.from("profiles").update({ is_banned: false }).eq("id", targetId);
+        addLog("USER_UNBANNED", "user", targetId, "Unbanned user");
+        showNotif("success", "User unbanned");
+        setProfilesRefreshKey(k => k + 1);
+        return;
+      } catch {}
+    }
     const accs = getAccounts();
     const idx = accs.findIndex((a) => a.profile.id === targetId);
     if (idx === -1) return showNotif("error", "User not found");
@@ -1324,7 +1376,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", "User unbanned");
   };
 
-  const handleDeleteUser = (targetId: string) => {
+  const handleDeleteUser = async (targetId: string) => {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        await sb.from("profiles").delete().eq("id", targetId);
+        addLog("USER_DELETED", "user", targetId, "Deleted user account");
+        showNotif("success", "User deleted");
+        setProfilesRefreshKey(k => k + 1);
+        return;
+      } catch {}
+    }
     const accs = getAccounts().filter((a) => a.profile.id !== targetId);
     saveAccounts(accs);
     addLog("USER_DELETED", "user", targetId, "Deleted user account");
