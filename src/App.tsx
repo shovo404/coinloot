@@ -10,7 +10,7 @@ import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnS
 import { calcLevelFromBalance } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 import { getSupabaseClient, getCurrentSession, getCurrentUser } from "./lib/supabase";
-import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting } from "./lib/supabaseService";
+import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting, markNotificationRead } from "./lib/supabaseService";
 import { realtimeManager } from "./lib/realtimeManager";
 import { AppRealtimeProvider } from "./hooks/useAppRealtimeState";
 
@@ -124,6 +124,10 @@ export default function App() {
 
   useEffect(() => { usernameRef.current = userProfile?.username || "User"; }, [userProfile?.username]);
   useEffect(() => { userIdRef.current = userProfile?.id || ""; }, [userProfile?.id]);
+
+  // ── Sequential ticker rotation ──
+  const [currentTickerIdx, setCurrentTickerIdx] = useState(0);
+  const [tickerVisible, setTickerVisible] = useState(true);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SUPABASE AUTH SESSION — Load existing session on mount & listen for changes
@@ -432,6 +436,31 @@ export default function App() {
         sourceName: n.sourceName || n.source_name,
       }));
 
+      // Merge in locally-stored notifications (from offer completions etc.)
+      // so they survive the poll cycle even if they haven't been saved to Supabase yet
+      try {
+        const stored = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+        if (Array.isArray(stored) && stored.length > 0) {
+          const existingIds = new Set(mapped.map((m) => m.id));
+          for (const n of stored) {
+            if (n.id && !existingIds.has(n.id)) {
+              mapped.push({
+                id: n.id,
+                title: n.title || "",
+                description: n.description || "",
+                time: n.time || new Date().toISOString(),
+                category: n.category || "system",
+                unread: n.unread !== false,
+                coinsEarned: n.coinsEarned ?? undefined,
+                sourceName: n.sourceName || undefined,
+              });
+              existingIds.add(n.id);
+            }
+          }
+          mapped.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        }
+      } catch {}
+
       // Detect new coin notifications for sound + popup
       const currentIds = new Set(mapped.map((n) => n.id));
       const prevIds = prevNotifIdsRef.current;
@@ -480,6 +509,16 @@ export default function App() {
       sourceName,
     };
     setNotifications((prev) => [newNotif, ...prev.slice(0, 49)]);
+
+    // Persist to localStorage so polling doesn't lose it
+    try {
+      const stored = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+      if (Array.isArray(stored)) {
+        const merged = [newNotif, ...stored.filter((n: any) => n.id !== newNotif.id)].slice(0, 50);
+        localStorage.setItem("coinloot_notifications", JSON.stringify(merged));
+      }
+    } catch {}
+
     playNotificationSound();
   }, []);
 
@@ -487,15 +526,39 @@ export default function App() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, unread: false } : n))
     );
+    markNotificationRead(id).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+      if (Array.isArray(stored)) {
+        const updated = stored.map((n: any) =>
+          n.id === id ? { ...n, unread: false, is_read: true } : n
+        );
+        localStorage.setItem("coinloot_notifications", JSON.stringify(updated));
+      }
+    } catch {}
   }, []);
 
   const handleMarkAllRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+    setNotifications((prev) => {
+      const unreadIds = prev.filter((n) => n.unread).map((n) => n.id);
+      for (const id of unreadIds) {
+        markNotificationRead(id).catch(() => {});
+      }
+      return prev.map((n) => ({ ...n, unread: false }));
+    });
+    try {
+      const stored = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+      if (Array.isArray(stored)) {
+        const updated = stored.map((n: any) => ({ ...n, unread: false, is_read: true }));
+        localStorage.setItem("coinloot_notifications", JSON.stringify(updated));
+      }
+    } catch {}
   }, []);
 
   // ── Centralized Reward Handler ──
   const handleRewardEarned = useCallback((coins: number, sourceName: string, message?: string) => {
     if (coins <= 0) return;
+    if (userProfile?.status === "restricted" || userProfile?.status === "banned") return;
 
     const finalMessage = message || `You earned ${coins.toLocaleString()} coins from ${sourceName}.`;
 
@@ -551,11 +614,31 @@ export default function App() {
     // Update live feed
     setLiveEarnerFeed(prev => [
       { id: `fe-${Math.random()}`, user: usernameRef.current, provider: sourceName, coins },
-      ...prev.slice(0, 3)
+      ...prev.slice(0, 9)
     ]);
 
 
   }, [setUserProfile, addNotification, addPopup, userProfile, supabase]);
+
+  // ── Rotate live ticker every 4s ──
+  useEffect(() => {
+    if (liveEarnerFeed.length === 0) return;
+    const interval = setInterval(() => {
+      setTickerVisible(false);
+      setTimeout(() => {
+        setCurrentTickerIdx(prev => (prev + 1) % liveEarnerFeed.length);
+        setTickerVisible(true);
+      }, 400);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [liveEarnerFeed.length]);
+
+  // Reset ticker index when feed shrinks
+  useEffect(() => {
+    if (liveEarnerFeed.length > 0 && currentTickerIdx >= liveEarnerFeed.length) {
+      setCurrentTickerIdx(0);
+    }
+  }, [liveEarnerFeed.length]);
 
   // ── VPN Detection ──
   const vpnDetectedRef = useRef(false);
@@ -615,16 +698,22 @@ export default function App() {
     };
   }, [userProfile?.id, addNotification]);
 
-  // ── Restriction check ──
-  const [isRestricted, setIsRestricted] = useState(false);
+  // ── Restriction check (syncs userProfile.status with restriction engine) ──
+  const isRestricted = userProfile?.status === "restricted" || userProfile?.status === "banned";
   const [restrictionRemaining, setRestrictionRemaining] = useState("");
 
   useEffect(() => {
-    if (!userProfile) { setIsRestricted(false); return; }
+    if (!userProfile) return;
     const check = () => {
       const result = isUserRestricted(userProfile.id);
-      setIsRestricted(result.restricted);
-      setRestrictionRemaining(result.remaining);
+      // Sync profile status if engine disagrees with profile
+      const engineStatus = result.restricted ? "restricted" : "active";
+      if (userProfile.status !== engineStatus) {
+        setUserProfile(prev => prev ? { ...prev, status: engineStatus as "active" | "restricted" | "banned" } : prev);
+      }
+      if (result.restricted) {
+        setRestrictionRemaining(result.remaining);
+      }
     };
     check();
     const interval = setInterval(check, 5000);
@@ -632,6 +721,7 @@ export default function App() {
   }, [userProfile?.id]);
 
   const handleAddNewWithdrawalRequest = useCallback(async (req: WithdrawalRequest) => {
+    if (userProfile?.status === "restricted" || userProfile?.status === "banned") return;
     setWithdrawals(prev => [req, ...prev]);
     addNotification("Withdrawal Requested", `${req.usd_value.toFixed(2)} USD withdrawal via ${req.payout_method.toUpperCase()} is pending review.`, "system");
     // Persist to Supabase
@@ -847,9 +937,9 @@ export default function App() {
                   We partner with the top offerwalls to bring you the highest payouts.
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="flex gap-4 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory scrollbar-hide">
                 {OFFERWALL_PROVIDERS.map((p, i) => (
-                  <div key={i} className={`p-4 rounded-2xl bg-gradient-to-br ${p.color} border ${p.border} text-center transition-all hover:scale-[1.03] duration-300 cursor-default`}>
+                  <div key={i} className={`p-4 rounded-2xl bg-gradient-to-br ${p.color} border ${p.border} text-center transition-all hover:scale-[1.03] duration-300 cursor-default snap-start shrink-0 w-[130px]`}>
                     <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-3">
                       <Zap className="w-5 h-5 text-white/70" />
                     </div>
@@ -1112,50 +1202,42 @@ export default function App() {
           </div>
         )}
 
-        {/* ═══════ LIVE EARNINGS TICKER (shown in Dashboard) ═══════ */}
+        {/* ═══════ LIVE EARNINGS TICKER (sequential) ═══════ */}
         {isDashboardView && userProfile && (
           <div className="border-b border-white/5 bg-slate-950/80 backdrop-blur-xl px-3 sm:px-4 lg:px-8">
             <div className="max-w-7xl mx-auto">
-              <div className="py-2 overflow-hidden relative group">
-                <div className="flex items-center gap-3 animate-ticker hover:[animation-play-state:paused]">
-                  {liveEarnerFeed.length > 0 ? (
-                    [...liveEarnerFeed, ...liveEarnerFeed].map((item, idx) => (
-                      <div key={`${item.id}-${idx}`} className="flex items-center gap-2 shrink-0 font-mono text-[10px]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                        <span className="font-sans font-semibold text-slate-300 whitespace-nowrap">{item.user}</span>
-                        <span className="text-slate-500 whitespace-nowrap">earned</span>
-                        <span className="font-bold text-cyan-400 whitespace-nowrap">{item.coins.toLocaleString()} coins</span>
-                        <span className="text-slate-500 whitespace-nowrap">from</span>
-                        <span className="text-purple-300 whitespace-nowrap">{item.provider}</span>
-                        <span className="mx-3 text-slate-600">•</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center gap-2 font-mono text-[10px] text-slate-500">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0" />
-                      <span>Live feed loading...</span>
-                    </div>
-                  )}
-                </div>
-                <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-slate-950 to-transparent pointer-events-none" />
-                <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-950 to-transparent pointer-events-none" />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ═══════ RESTRICTION BANNER ═══════ */}
-        {isRestricted && (
-          <div className="max-w-7xl mx-auto px-4 lg:px-8 pt-4">
-            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <ShieldCheck className="w-5 h-5 text-rose-400 shrink-0" />
-                <div>
-                  <span className="block text-xs font-semibold text-rose-300">Account Restricted</span>
-                  <span className="block text-[10px] text-rose-400/80 font-mono mt-0.5">
-                    Your account has been temporarily restricted by the admin for security reasons. Remaining: {restrictionRemaining}
-                  </span>
-                </div>
+              <div className="py-2 overflow-hidden">
+                {liveEarnerFeed.length > 0 ? (
+                  <div
+                    className={`flex items-center justify-center sm:justify-start gap-2 sm:gap-3 transition-all duration-[400ms] ${
+                      tickerVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    {liveEarnerFeed[currentTickerIdx].user === usernameRef.current ? (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/20 font-sans shrink-0">
+                        YOU
+                      </span>
+                    ) : (
+                      <span className="font-sans font-semibold text-slate-300 whitespace-nowrap text-[10px] sm:text-xs">
+                        {liveEarnerFeed[currentTickerIdx].user}
+                      </span>
+                    )}
+                    <span className="text-slate-500 text-[10px] sm:text-xs whitespace-nowrap">earned</span>
+                    <span className="font-bold text-emerald-400 text-[10px] sm:text-xs whitespace-nowrap">
+                      {liveEarnerFeed[currentTickerIdx].coins.toLocaleString()} coins
+                    </span>
+                    <span className="text-slate-500 text-[10px] sm:text-xs whitespace-nowrap">from</span>
+                    <span className="text-purple-300 text-[10px] sm:text-xs whitespace-nowrap">
+                      {liveEarnerFeed[currentTickerIdx].provider}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center sm:justify-start gap-2 font-mono text-[10px] text-slate-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0" />
+                    <span>Live feed loading...</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1164,17 +1246,38 @@ export default function App() {
         {/* ═══════ DASHBOARD VIEW ═══════ */}
         {isDashboardView && userProfile && (
           <div className="animate-fade-in pb-24 lg:pb-8">
-              {activeTab === "offers" && (
-                <EarnPage user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
-              )}
+            {isRestricted && (activeTab === "offers" || activeTab === "withdraw" || activeTab === "rewards" || activeTab === "kyc-upload" || activeTab === "affiliates") ? (
+              <div className="max-w-lg mx-auto mt-12 text-center p-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                  <ShieldCheck className="w-8 h-8 text-rose-400" />
+                </div>
+                <h2 className="text-lg font-bold text-white mb-2">Feature Unavailable</h2>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  This feature is not available while your account is restricted.
+                  Please contact support if you believe this is a mistake.
+                </p>
+              </div>
+            ) : (
+              <>
+                {activeTab === "offers" && (
+                  <EarnPage user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
+                )}
+                {activeTab === "withdraw" && (
+                  <WithdrawHub user={userProfile} setUser={setUserProfile} withdrawals={withdrawals} onAddWithdrawal={handleAddNewWithdrawalRequest} />
+                )}
+                {activeTab === "rewards" && (
+                  <RewardsStore user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} />
+                )}
+                {activeTab === "kyc-upload" && (
+                  <KycUploadPage user={userProfile} setUser={setUserProfile} />
+                )}
+                {activeTab === "affiliates" && (
+                  <ReferralsAffiliates user={userProfile} />
+                )}
+              </>
+            )}
               {activeTab === "support-ticket" && (
                 <SupportTicket user={userProfile} setUser={setUserProfile} />
-              )}
-              {activeTab === "withdraw" && (
-                <WithdrawHub user={userProfile} setUser={setUserProfile} withdrawals={withdrawals} onAddWithdrawal={handleAddNewWithdrawalRequest} />
-              )}
-              {activeTab === "rewards" && (
-                <RewardsStore user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} />
               )}
               {activeTab === "my-profile" && (
                 <MyProfilePage user={userProfile} />
@@ -1185,12 +1288,6 @@ export default function App() {
               {activeTab === "security-settings" && (
                 <SecuritySettingsPage user={userProfile} setUser={setUserProfile} />
               )}
-              {activeTab === "kyc-upload" && (
-                <KycUploadPage user={userProfile} setUser={setUserProfile} />
-              )}
-              {activeTab === "affiliates" && (
-                <ReferralsAffiliates user={userProfile} />
-              )}
               {activeTab === "leaderboard" && (
                 <LeaderboardPodium />
               )}
@@ -1200,7 +1297,13 @@ export default function App() {
 
       <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
       <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
-      {userProfile && <RestrictionPage userId={userProfile.id} />}
+      {userProfile && (
+        <RestrictionPage
+          userId={userProfile.id}
+          onLogout={handleLogout}
+          onContactSupport={() => { setActiveTab("support-ticket"); setIsDashboardView(true); }}
+        />
+      )}
       {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}
 
       <RewardPopup popups={rewardPopups} onDismiss={dismissPopup} />

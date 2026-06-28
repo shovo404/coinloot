@@ -1,9 +1,8 @@
-import { useState, useMemo } from "react";
-import { Lock, Coins, Gift, ChevronRight, Sparkles, Star, Zap } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Coins, Lock } from "lucide-react";
 import { UserProfile } from "../types";
 import { LockedOfferwallConfig, isOfferwallUnlocked, addUserUnlock } from "../utils/lockedOfferwallDB";
 import { getProviderInfo, getProviderLogoUrl } from "../utils/providerLogos";
-import PromoUnlockModal from "./PromoUnlockModal";
 
 interface Props {
   key?: string;
@@ -12,8 +11,28 @@ interface Props {
   onUnlocked: (providerName: string) => void;
 }
 
+const PROVIDER_GRADIENT_SPLIT = ["TOROX", "BITLABS", "ADGEM", "MONLIX"];
+const PROVIDER_FULL_GRADIENT = ["CPX RESEARCH", "TIME WALL", "THEOREMREACH", "LOOTABLY", "ADGATE MEDIA"];
+
+function formatName(name: string): { first: string; rest: string; isGradient: boolean } {
+  const upper = name.toUpperCase();
+  if (PROVIDER_GRADIENT_SPLIT.some((p) => upper.includes(p) || upper === p)) {
+    const mid = Math.ceil(upper.length / 2);
+    return { first: upper.slice(0, mid), rest: upper.slice(mid), isGradient: true };
+  }
+  if (PROVIDER_FULL_GRADIENT.some((p) => upper.includes(p) || upper === p)) {
+    return { first: "", rest: upper, isGradient: true };
+  }
+  return { first: upper, rest: "", isGradient: false };
+}
+
 export default function LockedOfferwallCard({ config, user, onUnlocked }: Props) {
-  const [showPromo, setShowPromo] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 100);
+    return () => clearTimeout(t);
+  }, []);
 
   if (!config.isLocked) return null;
 
@@ -22,7 +41,6 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
   const earned = user.total_earned_coins;
   const required = config.requiredCoins;
   const progress = Math.min(100, Math.round((earned / required) * 100));
-  const remaining = Math.max(0, required - earned);
   const autoUnlocked = earned >= required && !alreadyUnlocked;
 
   if (autoUnlocked) {
@@ -39,74 +57,103 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
 
   if (alreadyUnlocked) return null;
 
-  const handlePromoSuccess = () => {
-    addUserUnlock({
-      id: `ul-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      userId: user.id,
-      offerwallName: config.providerName,
-      unlockedBy: "promo",
-      promoCode: null,
-      unlockedAt: new Date().toISOString(),
-    });
-    onUnlocked(config.providerName);
-  };
-
   const logoUrl = config.logo || getProviderLogoUrl(config.providerName);
-  const color = provider.color || "from-cyan-500 to-purple-600";
-
-  const lockPulseStyle = useMemo(() => ({
-    animation: "lockPulse 2s ease-in-out infinite",
-  }), []);
+  const titleFormatted = formatName(config.providerName);
 
   return (
     <>
       <style>{`
-        @keyframes lockPulse {
-          0%, 100% { box-shadow: 0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(251, 191, 36, 0.1); }
-          50% { box-shadow: 0 0 30px rgba(251, 191, 36, 0.5), 0 0 60px rgba(251, 191, 36, 0.2); }
+        @keyframes floatLock {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-6px); }
         }
         @keyframes glowPulse {
-          0%, 100% { opacity: 0.6; }
-          50% { opacity: 1; }
+          0%, 100% { box-shadow: 0 0 20px rgba(250,204,21,0.2), 0 0 40px rgba(250,204,21,0.1); }
+          50% { box-shadow: 0 0 35px rgba(250,204,21,0.4), 0 0 60px rgba(250,204,21,0.15); }
+        }
+        @keyframes borderNeon {
+          0%, 100% { border-color: rgba(124,58,237,0.25); }
+          50% { border-color: rgba(124,58,237,0.5); }
+        }
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
+        }
+        @keyframes fadeSlideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         @keyframes progressFill {
           from { width: 0%; }
         }
+        .card-premium-enter { animation: fadeSlideUp 0.5s ease-out both; }
       `}</style>
-      <div className="group relative flex flex-col rounded-2xl overflow-hidden transition-all duration-300 w-full border border-white/[0.06] hover:border-amber-500/20"
-        style={{ aspectRatio: "3/4", minHeight: "320px", maxHeight: "400px" }}
+
+      <div
+        className={`card-premium-enter relative flex flex-col rounded-3xl overflow-hidden transition-all duration-500 w-full border hover:scale-[1.015]`}
+        style={{
+          aspectRatio: "3/4",
+          minHeight: "380px",
+          maxHeight: "460px",
+          borderColor: "rgba(124,58,237,0.25)",
+          animation: "borderNeon 3s ease-in-out infinite, fadeSlideUp 0.5s ease-out",
+          background: "linear-gradient(160deg, #0B0E1A 0%, #111827 40%, #18192D 100%)",
+          boxShadow: "0 0 40px rgba(124,58,237,0.08), inset 0 1px 0 rgba(255,255,255,0.03)",
+        }}
       >
-        {/* ── Background ── */}
-        <div className="absolute inset-0 z-0 overflow-hidden">
+        {/* ── Background Effects ── */}
+        <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
           {logoUrl && (
             <img
               src={logoUrl}
               alt=""
-              className="w-full h-full object-cover opacity-[0.2] scale-105"
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[180px] h-[180px] object-contain opacity-[0.04] scale-110"
             />
           )}
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0a0e27]/90 via-[#0d1235]/85 to-[#120a2e]/90" />
-          <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/[0.06] via-transparent to-purple-600/[0.06]" />
+          <div
+            className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full pointer-events-none"
+            style={{ background: "radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)" }}
+          />
+          <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-purple-500/5 blur-[60px]" />
+          <div className="absolute -bottom-20 -left-20 w-40 h-40 rounded-full bg-pink-500/5 blur-[60px]" />
+          <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
         </div>
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-1/2 bg-amber-500/[0.04] rounded-full blur-[80px] z-0 pointer-events-none" />
 
-        {/* ── Top Section ── */}
-        <div className="relative z-10 flex flex-col items-center pt-6 pb-4 px-5">
-          {/* Lock Badge - Top Right */}
-          <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.08] backdrop-blur-md">
-            <Lock className="w-3 h-3 text-amber-300" />
-            <span className="text-[9px] font-bold text-white/80 tracking-widest uppercase">Locked</span>
-          </div>
+        {/* ── LOCKED Badge ── */}
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md"
+          style={{
+            background: "linear-gradient(135deg, rgba(124,58,237,0.25), rgba(147,51,234,0.15))",
+            border: "1px solid rgba(124,58,237,0.3)",
+          }}
+        >
+          <Lock className="w-3 h-3 text-white" />
+          <span className="text-[8px] font-extrabold tracking-[0.15em] uppercase text-white">Locked</span>
+        </div>
 
-          {/* Glowing Gold Lock Icon */}
-          <div className="mb-3" style={lockPulseStyle}>
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400/20 to-yellow-600/20 border border-amber-400/30 flex items-center justify-center backdrop-blur-md">
-              <Lock className="w-5 h-5 text-amber-300" />
+        {/* ── Hero Section ── */}
+        <div className="relative z-10 flex flex-col items-center pt-8 pb-3 px-5">
+          <div className="mb-4" style={{ animation: "floatLock 3s ease-in-out infinite" }}>
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center"
+              style={{
+                background: "radial-gradient(circle, rgba(250,204,21,0.2), rgba(245,158,11,0.05))",
+                animation: "glowPulse 2.5s ease-in-out infinite",
+              }}
+            >
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400/15 to-yellow-600/10 border border-amber-400/25 flex items-center justify-center backdrop-blur-sm">
+                <Lock className="w-6 h-6 text-amber-300" />
+              </div>
             </div>
           </div>
 
-          {/* Provider Logo */}
-          <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-md flex items-center justify-center p-2.5 mb-3 shadow-[0_0_30px_rgba(168,85,247,0.08)]">
+          <div
+            className="w-[72px] h-[72px] rounded-2xl backdrop-blur-xl flex items-center justify-center p-3.5 mb-3.5 overflow-hidden"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
             {logoUrl ? (
               <img
                 src={logoUrl}
@@ -122,100 +169,99 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
                 }}
               />
             ) : null}
-            <div className={`locked-premium-fb ${logoUrl ? "hidden" : ""} w-full h-full rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
-              <span className="text-lg font-bold text-white">{config.providerName[0].toUpperCase()}</span>
+            <div className={`locked-premium-fb ${logoUrl ? "hidden" : ""} w-full h-full rounded-xl bg-gradient-to-br ${provider.color || "from-purple-500 to-pink-600"} flex items-center justify-center`}>
+              <span className="text-xl font-bold text-white">{provider.initials || config.providerName[0].toUpperCase()}</span>
             </div>
           </div>
 
-          {/* Provider Name */}
-          <h3 className="text-lg font-extrabold text-white text-center tracking-wide">
-            {(config.title || config.providerName).toUpperCase()}
+          <h3 className="text-xl font-extrabold text-center tracking-wide leading-tight">
+            {titleFormatted.isGradient ? (
+              <>
+                <span className="text-white">{titleFormatted.first}</span>
+                <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                  {titleFormatted.rest}
+                </span>
+              </>
+            ) : (
+              <span className="text-white">{titleFormatted.first}</span>
+            )}
           </h3>
 
-          {/* Subtitle with decorative separators */}
-          <div className="flex items-center gap-3 mt-1.5 w-full max-w-[220px]">
-            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-            <span className="text-[9px] text-white/50 font-medium tracking-widest uppercase whitespace-nowrap">
-              {config.subtitle || "Premium Offerwall"}
-            </span>
-            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          <span className="text-[10px] text-gray-400 font-medium tracking-[0.15em] uppercase mt-1.5">
+            Premium Surveys & Offers
+          </span>
+
+          <div className="flex items-center gap-3 w-full max-w-[180px] mt-3">
+            <div className="flex-1 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(124,58,237,0.3), transparent)" }} />
+            <div className="w-1.5 h-1.5 rounded-full bg-purple-500/50" />
+            <div className="flex-1 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(124,58,237,0.3), transparent)" }} />
           </div>
         </div>
 
         {/* ── Bottom Section ── */}
-        <div className="relative z-10 flex-1 flex flex-col gap-2.5 px-5 pb-5">
-          {/* Unlock Requirement Card */}
-          <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] backdrop-blur-md px-4 py-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400/20 to-yellow-600/20 border border-amber-400/20 flex items-center justify-center shrink-0">
-              <Coins className="w-4 h-4 text-amber-300" />
+        <div className="relative z-10 flex-1 flex flex-col gap-2.5 px-5 pb-5 justify-end">
+          <div
+            className="rounded-2xl backdrop-blur-md px-4 py-3.5 flex items-center gap-3"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{
+                background: "linear-gradient(135deg, rgba(250,204,21,0.2), rgba(245,158,11,0.1))",
+                border: "1px solid rgba(250,204,21,0.2)",
+              }}
+            >
+              <Coins className="w-5 h-5 text-amber-300" />
             </div>
             <div>
-              <p className="text-[11px] text-white/70 font-medium">Unlock at</p>
-              <p className="text-sm font-extrabold text-amber-300">{required.toLocaleString()} Coins</p>
+              <p className="text-[9px] text-gray-400 font-medium tracking-wide uppercase">Unlock at</p>
+              <p className="text-base font-extrabold tracking-tight text-amber-300">
+                {required.toLocaleString()} Coins
+              </p>
             </div>
           </div>
 
-          {/* Your Progress Section */}
-          <div className="space-y-2">
-            <p className="text-[8px] text-white/40 font-semibold tracking-[0.15em] uppercase">Your Progress</p>
-            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] backdrop-blur-md px-4 py-3">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[11px] text-white/60 font-mono">{earned.toLocaleString()} / {required.toLocaleString()} Coins</span>
-                <span className="text-sm font-extrabold text-amber-300">{progress}%</span>
-              </div>
-              <div className="h-2.5 rounded-full bg-white/[0.06] overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-1000 ease-out"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Remaining Coins */}
-          {remaining > 0 ? (
-            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] backdrop-blur-md px-4 py-3 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-600/20 border border-purple-500/20 flex items-center justify-center shrink-0">
-                <Zap className="w-4 h-4 text-purple-300" />
-              </div>
-              <div>
-                <p className="text-[11px] text-white font-bold">Earn {remaining.toLocaleString()} more coins</p>
-                <p className="text-[8px] text-white/40 tracking-wide">to unlock this offerwall</p>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-md px-4 py-3 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <Star className="w-4 h-4 text-emerald-300" />
-              </div>
-              <div>
-                <p className="text-[11px] text-emerald-300 font-bold">Coin requirement met!</p>
-                <p className="text-[8px] text-emerald-400/60">Use promo code to unlock</p>
-              </div>
-            </div>
-          )}
-
-          {/* Action Button */}
-          <button
-            onClick={() => setShowPromo(true)}
-            className="relative group/btn w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-pink-600 text-white text-[10px] font-extrabold tracking-wider uppercase hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(168,85,247,0.15)] hover:shadow-[0_0_40px_rgba(168,85,247,0.3)]"
+          <div
+            className="rounded-2xl backdrop-blur-md px-4 py-3.5"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
           >
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-violet-500/0 via-white/10 to-pink-500/0 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-            <Gift className="w-3.5 h-3.5 relative z-10" />
-            <span className="relative z-10">Claim Offer With Code</span>
-            <ChevronRight className="w-3 h-3 relative z-10" />
-          </button>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[8px] text-gray-500 font-semibold tracking-[0.15em] uppercase">Your Progress</span>
+              <span className="text-sm font-extrabold text-amber-300">{progress}%</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-white/[0.06] overflow-hidden p-[2px] mb-2.5">
+              <div
+                className="h-full rounded-full transition-all duration-1000 ease-out"
+                style={{
+                  width: `${progress}%`,
+                  background: "linear-gradient(90deg, #FACC15, #F59E0B)",
+                  boxShadow: "0 0 12px rgba(250,204,21,0.3)",
+                  animation: progress > 0 ? "progressFill 1s ease-out" : undefined,
+                }}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-300 font-bold text-sm">{earned.toLocaleString()}</span>
+              <span className="text-gray-500 text-xs font-mono">/ {required.toLocaleString()} Coins</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Bottom Pagination ── */}
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(250,204,21,0.5)]" />
+          <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
+          <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
+          <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
+          <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
         </div>
       </div>
-
-      {showPromo && (
-        <PromoUnlockModal
-          offerwallName={config.providerName}
-          userId={user.id}
-          onSuccess={handlePromoSuccess}
-          onClose={() => setShowPromo(false)}
-        />
-      )}
     </>
   );
 }

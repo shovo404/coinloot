@@ -24,6 +24,11 @@ export interface UserProfile {
   avatar_url?: string;
   preference_theme?: string;
   preference_language?: string;
+  status?: 'active' | 'restricted' | 'banned';
+  restriction_reason?: string;
+  restricted_at?: string;
+  restricted_by?: string;
+  restriction_notes?: string;
 }
 
 export interface Offer {
@@ -31,11 +36,43 @@ export interface Offer {
   title: string;
   description: string;
   payout_coins: number;
+  max_reward?: number;
   category: 'trending' | 'high-paying' | 'new' | 'recommended' | 'ai';
   provider: string;
   imageUrl: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
   link: string;
+  description_full?: string;
+  requirements?: string[];
+  estimated_time?: string;
+  countries?: number;
+  is_mobile_only?: boolean;
+  is_pinned?: boolean;
+  tracking_link?: string;
+  steps?: OfferStep[];
+}
+
+export interface OfferStep {
+  id: string;
+  label: string;
+  reward: number;
+  order: number;
+}
+
+export interface FavoriteOffer {
+  id: string;
+  userId: string;
+  offerId: string;
+  createdAt: string;
+}
+
+export interface OfferActivity {
+  id: string;
+  offerId: string;
+  username: string;
+  reward: number;
+  step?: string;
+  createdAt: string;
 }
 
 export interface RewardItem {
@@ -163,6 +200,29 @@ export interface UserStatus {
   banReason: string;
   suspendedAt: string | null;
   bannedAt: string | null;
+}
+
+export interface RestrictionInfo {
+  userId: string;
+  status: 'active' | 'restricted' | 'banned';
+  reason: string;
+  notes: string;
+  restrictedAt: string;
+  restrictedUntil: string | null;
+  restrictedBy: string;
+  permanent: boolean;
+}
+
+export interface RestrictionLogEntry {
+  id: string;
+  userId: string;
+  action: 'restricted' | 'unrestricted' | 'banned' | 'unbanned';
+  reason: string;
+  adminId: string;
+  adminName: string;
+  timestamp: string;
+  expiry: string | null;
+  notes: string;
 }
 
 

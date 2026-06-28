@@ -243,6 +243,26 @@ export function clearDetectionLogs() {
 
 // ── Restriction Management ──
 
+interface RestrictionEntry {
+  userId: string;
+  restrictedUntil: string;  // ISO date, or "" for permanent
+  reason: string;
+  notes: string;
+  restrictedAt: string;
+  restrictedBy: string;
+  permanent: boolean;
+}
+
+function getRestrictionEntries(): RestrictionEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem("coinloot_restricted_users_v2") || "[]");
+  } catch { return []; }
+}
+
+function saveRestrictionEntries(entries: RestrictionEntry[]) {
+  localStorage.setItem("coinloot_restricted_users_v2", JSON.stringify(entries));
+}
+
 export function isUserRestricted(userId: string): {
   restricted: boolean;
   until: string | null;
@@ -254,18 +274,16 @@ export function isUserRestricted(userId: string): {
   reason: string;
 } {
   try {
-    const restricted: { userId: string; restrictedUntil: string; reason: string }[] = JSON.parse(
-      localStorage.getItem("coinloot_restricted_users") || "[]"
-    );
-    const entry = restricted.find((r) => r.userId === userId);
-    if (!entry) {
-      return { restricted: false, until: null, remaining: "", days: 0, hours: 0, minutes: 0, seconds: 0, reason: "" };
+    const entries = getRestrictionEntries();
+    const entry = entries.find((r) => r.userId === userId);
+    if (!entry) return { restricted: false, until: null, remaining: "", days: 0, hours: 0, minutes: 0, seconds: 0, reason: "" };
+    if (entry.permanent) {
+      return { restricted: true, until: null, remaining: "Permanent", days: 0, hours: 0, minutes: 0, seconds: 0, reason: entry.reason };
     }
     const now = Date.now();
     const until = new Date(entry.restrictedUntil).getTime();
     if (now >= until) {
-      const updated = restricted.filter((r) => r.userId !== userId);
-      localStorage.setItem("coinloot_restricted_users", JSON.stringify(updated));
+      saveRestrictionEntries(entries.filter((r) => r.userId !== userId));
       return { restricted: false, until: null, remaining: "", days: 0, hours: 0, minutes: 0, seconds: 0, reason: "" };
     }
     const diffMs = until - now;
@@ -281,54 +299,123 @@ export function isUserRestricted(userId: string): {
   }
 }
 
-export function restrictUser(userId: string, durationMinutes: number, reason: string) {
+export function restrictUser(
+  userId: string,
+  durationMinutes: number,
+  reason: string,
+  adminName: string = "Admin",
+  notes: string = ""
+) {
   try {
-    const restricted: { userId: string; restrictedUntil: string; reason: string }[] = JSON.parse(
-      localStorage.getItem("coinloot_restricted_users") || "[]"
-    );
-    const existing = restricted.findIndex((r) => r.userId === userId);
-    const entry = {
+    const entries = getRestrictionEntries();
+    const existing = entries.findIndex((r) => r.userId === userId);
+    const entry: RestrictionEntry = {
       userId,
       restrictedUntil: new Date(Date.now() + durationMinutes * 60000).toISOString(),
       reason,
+      notes,
+      restrictedAt: new Date().toISOString(),
+      restrictedBy: adminName,
+      permanent: false,
     };
     if (existing >= 0) {
-      restricted[existing] = entry;
+      entries[existing] = entry;
     } else {
-      restricted.push(entry);
+      entries.push(entry);
     }
-    localStorage.setItem("coinloot_restricted_users", JSON.stringify(restricted));
+    saveRestrictionEntries(entries);
+    updateUserProfileStatus(userId, "restricted");
+  } catch { /* */ }
+}
+
+export function banUser(
+  userId: string,
+  reason: string,
+  adminName: string = "Admin",
+  notes: string = ""
+) {
+  try {
+    const entries = getRestrictionEntries();
+    const existing = entries.findIndex((r) => r.userId === userId);
+    const entry: RestrictionEntry = {
+      userId,
+      restrictedUntil: "",
+      reason,
+      notes,
+      restrictedAt: new Date().toISOString(),
+      restrictedBy: adminName,
+      permanent: true,
+    };
+    if (existing >= 0) {
+      entries[existing] = entry;
+    } else {
+      entries.push(entry);
+    }
+    saveRestrictionEntries(entries);
+    updateUserProfileStatus(userId, "banned");
   } catch { /* */ }
 }
 
 export function unRestrictUser(userId: string) {
   try {
-    const restricted = JSON.parse(localStorage.getItem("coinloot_restricted_users") || "[]");
-    localStorage.setItem("coinloot_restricted_users", JSON.stringify(restricted.filter((r: any) => r.userId !== userId)));
+    const entries = getRestrictionEntries();
+    saveRestrictionEntries(entries.filter((r) => r.userId !== userId));
+    updateUserProfileStatus(userId, "active");
   } catch { /* */ }
 }
 
-export function getRestrictedUsers(): { userId: string; restrictedUntil: string; reason: string }[] {
+export function unbanUser(userId: string) {
+  unRestrictUser(userId);
+}
+
+export function getRestrictedUsers(): { userId: string; restrictedUntil: string; reason: string; permanent: boolean; restrictedBy: string; restrictedAt: string; notes: string }[] {
   try {
-    const restricted = JSON.parse(localStorage.getItem("coinloot_restricted_users") || "[]");
+    const entries = getRestrictionEntries();
     const now = Date.now();
-    const active = restricted.filter((r: any) => new Date(r.restrictedUntil).getTime() > now);
-    if (active.length !== restricted.length) {
-      localStorage.setItem("coinloot_restricted_users", JSON.stringify(active));
-    }
-    return active;
+    return entries.filter((r: RestrictionEntry) => {
+      if (r.permanent) return true;
+      return new Date(r.restrictedUntil).getTime() > now;
+    });
   } catch { return []; }
+}
+
+export function getFullRestrictionInfo(userId: string): RestrictionEntry | null {
+  try {
+    return getRestrictionEntries().find((r) => r.userId === userId) || null;
+  } catch { return null; }
 }
 
 export function extendRestriction(userId: string, additionalMinutes: number) {
   try {
-    const restricted = JSON.parse(localStorage.getItem("coinloot_restricted_users") || "[]");
-    const idx = restricted.findIndex((r: any) => r.userId === userId);
+    const entries = getRestrictionEntries();
+    const idx = entries.findIndex((r) => r.userId === userId);
     if (idx === -1) return;
-    const current = new Date(restricted[idx].restrictedUntil).getTime();
+    const current = new Date(entries[idx].restrictedUntil).getTime();
     const base = current > Date.now() ? current : Date.now();
-    restricted[idx].restrictedUntil = new Date(base + additionalMinutes * 60000).toISOString();
-    localStorage.setItem("coinloot_restricted_users", JSON.stringify(restricted));
+    entries[idx].restrictedUntil = new Date(base + additionalMinutes * 60000).toISOString();
+    saveRestrictionEntries(entries);
+  } catch { /* */ }
+}
+
+function updateUserProfileStatus(userId: string, status: "active" | "restricted" | "banned") {
+  try {
+    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const updated = accounts.map((a: any) => {
+      if (a.profile?.id === userId || a.id === userId) {
+        return { ...a, profile: { ...a.profile, status } };
+      }
+      return a;
+    });
+    localStorage.setItem("coinloot_accounts", JSON.stringify(updated));
+
+    const storedProfile = localStorage.getItem("coinloot_user_profile");
+    if (storedProfile) {
+      const profile = JSON.parse(storedProfile);
+      if (profile.id === userId) {
+        profile.status = status;
+        localStorage.setItem("coinloot_user_profile", JSON.stringify(profile));
+      }
+    }
   } catch { /* */ }
 }
 

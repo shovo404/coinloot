@@ -101,6 +101,11 @@ export async function updateProfile(
   if (updates.preference_theme !== undefined) dbUpdates.preference_theme = updates.preference_theme;
   if (updates.preference_language !== undefined) dbUpdates.preference_language = updates.preference_language;
   if (updates.avatar_url !== undefined) dbUpdates.avatar_url = updates.avatar_url;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.restriction_reason !== undefined) dbUpdates.restriction_reason = updates.restriction_reason;
+  if (updates.restricted_at !== undefined) dbUpdates.restricted_at = updates.restricted_at;
+  if (updates.restricted_by !== undefined) dbUpdates.restricted_by = updates.restricted_by;
+  if (updates.restriction_notes !== undefined) dbUpdates.restriction_notes = updates.restriction_notes;
 
   const { error } = await sb.from("profiles").update(dbUpdates).eq("id", userId);
   if (error) throw error;
@@ -145,6 +150,11 @@ function mapDbProfileToUserProfile(data: any): UserProfile {
     preference_language: data.preference_language || undefined,
     is_banned: data.is_banned || false,
     registration_ip: data.registration_ip || undefined,
+    status: data.status || (data.is_banned ? "banned" : "active"),
+    restriction_reason: data.restriction_reason || undefined,
+    restricted_at: data.restricted_at || undefined,
+    restricted_by: data.restricted_by || undefined,
+    restriction_notes: data.restriction_notes || undefined,
   };
 }
 

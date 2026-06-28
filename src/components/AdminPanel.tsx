@@ -15,7 +15,7 @@ import {
 import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, SiteSettings, WithdrawalMethodConfig } from "../types";
 import { Ticket } from "./SupportTicket";
 import { playCoinSound } from "../utils/coinSound";
-import { restrictUser, unRestrictUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs } from "../utils/vpnDetector";
+import { restrictUser, unRestrictUser, banUser, unbanUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs } from "../utils/vpnDetector";
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
@@ -1196,7 +1196,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [editingOfferTitle, setEditingOfferTitle] = useState("");
   const [showAddOffer, setShowAddOffer] = useState(false);
-  const [newOffer, setNewOffer] = useState({ title: "", provider: "Torox", payout: 100, difficulty: "Easy" });
+  const [newOffer, setNewOffer] = useState({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false });
+  const [editingOfferExt, setEditingOfferExt] = useState<string | null>(null);
+  const [editOfferFull, setEditOfferFull] = useState<any>(null);
 
   const showNotif = (type: "success" | "error", message: string) => {
     setNotification({ type, message });
@@ -1356,43 +1358,29 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   };
 
   const handleBanUser = async (targetId: string, reason: string) => {
+    banUser(targetId, reason, user?.username || "Admin", "");
     const sb = getSupabaseClient();
     if (sb) {
       try {
-        await sb.from("profiles").update({ is_banned: true }).eq("id", targetId);
-        addLog("USER_BANNED", "user", targetId, `Banned user. Reason: ${reason}`);
-        showNotif("success", "User banned");
-        setProfilesRefreshKey(k => k + 1);
-        return;
+        await sb.from("profiles").update({ status: "banned", restriction_reason: reason }).eq("id", targetId);
       } catch {}
     }
-    const accs = getAccounts();
-    const idx = accs.findIndex((a) => a.profile.id === targetId);
-    if (idx === -1) return showNotif("error", "User not found");
-    accs[idx].profile.vpn_detected = true;
-    saveAccounts(accs);
     addLog("USER_BANNED", "user", targetId, `Banned user. Reason: ${reason}`);
-    showNotif("success", "User banned");
+    showNotif("error", "User banned permanently");
+    setProfilesRefreshKey(k => k + 1);
   };
 
   const handleUnbanUser = async (targetId: string) => {
+    unRestrictUser(targetId);
     const sb = getSupabaseClient();
     if (sb) {
       try {
-        await sb.from("profiles").update({ is_banned: false }).eq("id", targetId);
-        addLog("USER_UNBANNED", "user", targetId, "Unbanned user");
-        showNotif("success", "User unbanned");
-        setProfilesRefreshKey(k => k + 1);
-        return;
+        await sb.from("profiles").update({ status: "active", restriction_reason: null as any }).eq("id", targetId);
       } catch {}
     }
-    const accs = getAccounts();
-    const idx = accs.findIndex((a) => a.profile.id === targetId);
-    if (idx === -1) return showNotif("error", "User not found");
-    accs[idx].profile.vpn_detected = false;
-    saveAccounts(accs);
     addLog("USER_UNBANNED", "user", targetId, "Unbanned user");
     showNotif("success", "User unbanned");
+    setProfilesRefreshKey(k => k + 1);
   };
 
   const handleDeleteUser = async (targetId: string) => {
@@ -2028,8 +2016,10 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       <td className="p-3 text-right font-mono text-slate-300 hidden lg:table-cell">{p.level}</td>
                       <td className="p-3 text-right font-mono text-slate-300 hidden xl:table-cell">{p.total_earned_coins.toLocaleString()}</td>
                       <td className="p-3 text-center">
-                        {p.vpn_detected || p.is_banned ? (
+                        {p.status === "banned" || p.is_banned ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20"><Ban className="w-2.5 h-2.5" /> Banned</span>
+                        ) : p.status === "restricted" || p.vpn_detected ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20"><Clock className="w-2.5 h-2.5" /> Restricted</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><CheckCircle className="w-2.5 h-2.5" /> Active</span>
                         )}
@@ -2389,8 +2379,18 @@ const handleSaveOffers = (updated: typeof offers) => {
       const handleAddOffer = () => {
         if (!newOffer.title) return showNotif("error", "Offer title required");
         const id = `of-${Date.now()}`;
-        handleSaveOffers([...offers, { id, title: newOffer.title, provider: newOffer.provider, payout: newOffer.payout, status: "active", difficulty: newOffer.difficulty }]);
-        setNewOffer({ title: "", provider: "Torox", payout: 100, difficulty: "Easy" });
+        handleSaveOffers([...offers, {
+          id, title: newOffer.title, provider: newOffer.provider, payout: newOffer.payout,
+          status: "active", difficulty: newOffer.difficulty,
+          description_full: newOffer.description_full || "",
+          estimated_time: newOffer.estimated_time || "15 min",
+          countries: newOffer.countries || 10,
+          is_mobile_only: newOffer.is_mobile_only || false,
+          tracking_link: newOffer.tracking_link || "",
+          max_reward: newOffer.max_reward || 0,
+          is_pinned: newOffer.is_pinned || false,
+        }]);
+        setNewOffer({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false });
         setShowAddOffer(false);
         showNotif("success", "Offer created");
         addLog("OFFER_CREATED", "offer", id, `Created offer ${newOffer.title}`);
@@ -2409,7 +2409,7 @@ const handleSaveOffers = (updated: typeof offers) => {
           {showAddOffer && (
             <div className="bg-slate-950/40 p-5 rounded-3xl border border-cyan-500/20 space-y-3">
               <h3 className="text-xs font-bold text-cyan-400">New Offer</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <input value={newOffer.title} onChange={(e) => setNewOffer({ ...newOffer, title: e.target.value })} placeholder="Offer title" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
                 <select value={newOffer.provider} onChange={(e) => setNewOffer({ ...newOffer, provider: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
                   {offerwallProviders.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -2420,6 +2420,25 @@ const handleSaveOffers = (updated: typeof offers) => {
                   <option value="Medium">Medium</option>
                   <option value="Hard">Hard</option>
                 </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <input value={newOffer.estimated_time} onChange={(e) => setNewOffer({ ...newOffer, estimated_time: e.target.value })} placeholder="Est. time (e.g. 15 min)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                <input type="number" value={newOffer.countries} onChange={(e) => setNewOffer({ ...newOffer, countries: parseInt(e.target.value) || 0 })} placeholder="Countries" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                <input type="number" value={newOffer.max_reward || ""} onChange={(e) => setNewOffer({ ...newOffer, max_reward: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                <input value={newOffer.tracking_link} onChange={(e) => setNewOffer({ ...newOffer, tracking_link: e.target.value })} placeholder="Tracking link (URL)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+              </div>
+              <div>
+                <textarea value={newOffer.description_full} onChange={(e) => setNewOffer({ ...newOffer, description_full: e.target.value })} placeholder="Full description (optional)" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none" rows={2} />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                  <input type="checkbox" checked={newOffer.is_mobile_only} onChange={(e) => setNewOffer({ ...newOffer, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
+                  Mobile only
+                </label>
+                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                  <input type="checkbox" checked={newOffer.is_pinned} onChange={(e) => setNewOffer({ ...newOffer, is_pinned: e.target.checked })} className="accent-cyan-500" />
+                  Pinned
+                </label>
               </div>
               <button onClick={handleAddOffer} className="px-4 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer">
                 <Plus className="w-3 h-3 inline mr-1" /> Create Offer
@@ -2433,36 +2452,80 @@ const handleSaveOffers = (updated: typeof offers) => {
                 <thead><tr className="border-b border-white/5 text-slate-400 font-mono"><th className="text-left p-3 font-medium">Title</th><th className="text-left p-3 font-medium hidden sm:table-cell">Provider</th><th className="text-right p-3 font-medium">Payout</th><th className="text-left p-3 font-medium hidden md:table-cell">Difficulty</th><th className="text-center p-3 font-medium">Status</th><th className="text-right p-3 font-medium">Actions</th></tr></thead>
                 <tbody>
                   {offers.map((o) => (
-                    <tr key={o.id} className="border-b border-white/[0.02] hover:bg-white/[0.02]">
-                      <td className="p-3">
-                        {editingOfferId === o.id ? (
-                          <div className="flex items-center gap-1">
-                            <input value={editingOfferTitle} onChange={(e) => setEditingOfferTitle(e.target.value)} className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white w-40" />
-                            <button onClick={() => saveEditOffer(o.id)} className="p-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><CheckCircle className="w-3 h-3" /></button>
-                            <button onClick={() => setEditingOfferId(null)} className="p-1 rounded bg-slate-800/60 text-slate-400 border border-white/5"><X className="w-3 h-3" /></button>
+                    <React.Fragment key={o.id}>
+                      <tr className="border-b border-white/[0.02] hover:bg-white/[0.02]">
+                        <td className="p-3">
+                          {editingOfferId === o.id ? (
+                            <div className="flex items-center gap-1">
+                              <input value={editingOfferTitle} onChange={(e) => setEditingOfferTitle(e.target.value)} className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white w-40" />
+                              <button onClick={() => saveEditOffer(o.id)} className="p-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><CheckCircle className="w-3 h-3" /></button>
+                              <button onClick={() => setEditingOfferId(null)} className="p-1 rounded bg-slate-800/60 text-slate-400 border border-white/5"><X className="w-3 h-3" /></button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-white font-semibold">{o.title}</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-[10px] text-slate-400 hidden sm:table-cell">{o.provider}</td>
+                        <td className="p-3 text-right font-mono text-emerald-400 font-bold">{o.payout.toLocaleString()}</td>
+                        <td className="p-3 text-[10px] text-slate-400 hidden md:table-cell">{o.difficulty}</td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${o.status === "active" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : o.status === "inactive" ? "bg-slate-500/10 text-slate-400 border border-slate-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
+                            {o.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => startEditOffer(o.id)} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit Title"><Edit className="w-3 h-3" /></button>
+                            <button onClick={() => {
+                              setEditingOfferExt(editingOfferExt === o.id ? null : o.id);
+                              setEditOfferFull({ ...o });
+                            }} className={`p-1.5 rounded-lg transition-all cursor-pointer border ${editingOfferExt === o.id ? "bg-purple-500/20 text-purple-400 border-purple-500/30" : "bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/20"}`} title="Extended Edit"><Settings className="w-3 h-3" /></button>
+                            <button onClick={() => toggleOfferStatus(o.id)} className={`p-1.5 rounded-lg transition-all cursor-pointer ${o.status === "active" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"}`} title={o.status === "active" ? "Lock" : o.status === "inactive" ? "Unlock" : "Activate"}>
+                              {o.status === "active" ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                            </button>
+                            <button onClick={() => handleDeleteOffer(o.id)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer" title="Delete"><Trash2 className="w-3 h-3" /></button>
                           </div>
-                        ) : (
-                          <span className="text-xs text-white font-semibold">{o.title}</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-[10px] text-slate-400 hidden sm:table-cell">{o.provider}</td>
-                      <td className="p-3 text-right font-mono text-emerald-400 font-bold">{o.payout.toLocaleString()}</td>
-                      <td className="p-3 text-[10px] text-slate-400 hidden md:table-cell">{o.difficulty}</td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${o.status === "active" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : o.status === "inactive" ? "bg-slate-500/10 text-slate-400 border border-slate-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
-                          {o.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => startEditOffer(o.id)} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit Title"><Edit className="w-3 h-3" /></button>
-                          <button onClick={() => toggleOfferStatus(o.id)} className={`p-1.5 rounded-lg transition-all cursor-pointer ${o.status === "active" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"}`} title={o.status === "active" ? "Lock" : o.status === "inactive" ? "Unlock" : "Activate"}>
-                            {o.status === "active" ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                          </button>
-                          <button onClick={() => handleDeleteOffer(o.id)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer" title="Delete"><Trash2 className="w-3 h-3" /></button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {editingOfferExt === o.id && editOfferFull && (
+                        <tr className="border-b border-white/[0.02]">
+                          <td colSpan={6} className="p-4 bg-slate-950/60">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Extended Edit: {o.title}</h4>
+                                <button onClick={() => {
+                                  handleSaveOffers(offers.map((x) => x.id === o.id ? { ...editOfferFull } : x));
+                                  setEditingOfferExt(null);
+                                  showNotif("success", "Offer details updated");
+                                  addLog("OFFER_UPDATED", "offer", o.id, "Updated extended fields");
+                                }} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" /> Save
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                <input value={editOfferFull.estimated_time || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, estimated_time: e.target.value })} placeholder="Est. time" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
+                                <input type="number" value={editOfferFull.countries || 0} onChange={(e) => setEditOfferFull({ ...editOfferFull, countries: parseInt(e.target.value) || 0 })} placeholder="Countries" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
+                                <input type="number" value={editOfferFull.max_reward || 0} onChange={(e) => setEditOfferFull({ ...editOfferFull, max_reward: parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
+                                <input value={editOfferFull.tracking_link || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, tracking_link: e.target.value })} placeholder="Tracking link" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
+                              </div>
+                              <div>
+                                <textarea value={editOfferFull.description_full || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, description_full: e.target.value })} placeholder="Full description" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600 resize-none" rows={2} />
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                  <input type="checkbox" checked={editOfferFull.is_mobile_only || false} onChange={(e) => setEditOfferFull({ ...editOfferFull, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
+                                  Mobile only
+                                </label>
+                                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                  <input type="checkbox" checked={editOfferFull.is_pinned || false} onChange={(e) => setEditOfferFull({ ...editOfferFull, is_pinned: e.target.checked })} className="accent-cyan-500" />
+                                  Pinned
+                                </label>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -3642,8 +3705,11 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 <textarea value={restrictNote} onChange={(e) => setRestrictNote(e.target.value)} placeholder="Admin note about this restriction..." rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none" />
               </div>
               <div className="flex gap-2 pt-2">
-                <button onClick={() => { const totalMin = restrictDuration; if (totalMin > 0) { restrictUser(restrictModal.userId, totalMin, restrictReason || "Restricted by admin"); logRestrictionHistory({ id: `rh-${Date.now()}`, userId: restrictModal.userId, username: restrictModal.username, action: "restricted", duration: totalMin, reason: restrictReason || "Restricted by admin", adminNote: restrictNote || undefined, adminAction: `Restricted for ${totalMin} min by ${user?.username || "Admin"}${restrictNote ? ` — ${restrictNote}` : ""}`, timestamp: new Date().toISOString() }); addLog("USER_RESTRICTED", "user", restrictModal.userId, `Restricted ${restrictModal.username} for ${totalMin} min`); showNotif("success", `${restrictModal.username} restricted for ${totalMin} min`); setRestrictModal(null); } else { showNotif("error", "Duration required"); } }} className="flex-1 py-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold hover:bg-amber-500/30 transition-all cursor-pointer">
+                <button onClick={() => { const totalMin = restrictDuration; if (totalMin > 0) { restrictUser(restrictModal.userId, totalMin, restrictReason || "Restricted by admin", user?.username || "Admin", restrictNote || ""); logRestrictionHistory({ id: `rh-${Date.now()}`, userId: restrictModal.userId, username: restrictModal.username, action: "restricted", duration: totalMin, reason: restrictReason || "Restricted by admin", adminNote: restrictNote || undefined, adminAction: `Restricted for ${totalMin} min by ${user?.username || "Admin"}${restrictNote ? ` — ${restrictNote}` : ""}`, timestamp: new Date().toISOString() }); addLog("USER_RESTRICTED", "user", restrictModal.userId, `Restricted ${restrictModal.username} for ${totalMin} min`); showNotif("success", `${restrictModal.username} restricted for ${totalMin} min`); setRestrictModal(null); } else { showNotif("error", "Duration required"); } }} className="flex-1 py-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold hover:bg-amber-500/30 transition-all cursor-pointer">
                   <Clock className="w-3 h-3 inline mr-1" /> Restrict
+                </button>
+                <button onClick={() => { banUser(restrictModal.userId, restrictReason || "Permanent ban by admin", user?.username || "Admin", restrictNote || ""); logRestrictionHistory({ id: `rh-${Date.now()}`, userId: restrictModal.userId, username: restrictModal.username, action: "banned", duration: 0, reason: restrictReason || "Permanent ban", adminNote: restrictNote || undefined, adminAction: `Permanent ban by ${user?.username || "Admin"}${restrictNote ? ` — ${restrictNote}` : ""}`, timestamp: new Date().toISOString() }); addLog("USER_BANNED", "user", restrictModal.userId, `Banned ${restrictModal.username} permanently`); showNotif("error", `${restrictModal.username} permanently banned`); setRestrictModal(null); }} className="py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer px-3">
+                  <Ban className="w-3 h-3 inline mr-1" /> Ban
                 </button>
                 <button onClick={() => { unRestrictUser(restrictModal.userId); addLog("USER_UNRESTRICTED", "user", restrictModal.userId, `Unrestricted ${restrictModal.username}`); showNotif("success", "User unrestricted"); setRestrictModal(null); }} className="flex-1 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer">
                   <Unlock className="w-3 h-3 inline mr-1" /> Unrestrict

@@ -17,6 +17,7 @@ import SurveyHub from "./SurveyHub";
 import VpnBlockPopup from "./VpnBlockPopup";
 import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
 import LockedOfferwallCard from "./LockedOfferwallCard";
+import OfferDetailsModal from "./OfferDetailsModal";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 
 interface EarnPageProps {
@@ -88,6 +89,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const adminOffers = state.offers;
 
   const [viewingOffer, setViewingOffer] = useState<Offer | null>(null);
+  const [viewingOfferDetails, setViewingOfferDetails] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [apiOffers, setApiOffers] = useState<Offer[]>([]);
   const [vpnBlockedOfferwall, setVpnBlockedOfferwall] = useState(false);
@@ -362,10 +364,10 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
                       </div>
                     ) : (
                       <button
-                        onClick={() => handleLaunchOffer(offer)}
+                        onClick={() => setViewingOfferDetails(offer)}
                         className="w-full py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[10px] font-bold tracking-wide hover:scale-[1.02] transition-all shadow-lg shadow-cyan-500/10 flex items-center justify-center gap-1.5 cursor-pointer min-h-[40px]"
                       >
-                        <Zap className="w-3 h-3" /> Launch Offer
+                        <Zap className="w-3 h-3" /> View Offer
                       </button>
                     )}
                   </div>
@@ -478,19 +480,13 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
         </div>
         <HorizontalScroll snap>
           {OFFERWALL_PROVIDERS.map((name) => {
-            const offerCount = getProviderOfferCount(name);
             const locked = isProviderLocked(name);
-            const lockReason = getLockReason(name);
-            const provider = getProviderInfo(name);
 
             return (
-              <div key={name} className="snap-start shrink-0 w-[220px] sm:w-[240px] group">
+              <div key={name} className="snap-start shrink-0 w-[170px] sm:w-[190px] group">
                 <OfferwallCard
                   name={name}
-                  category={provider.category || "main"}
-                  offerCount={offerCount || 3}
                   locked={locked || isRestricted}
-                  lockReason={locked ? lockReason : isRestricted ? "Account restricted" : undefined}
                   onLaunch={locked || isRestricted ? undefined : () => handleLaunchProvider(name)}
                 />
               </div>
@@ -502,14 +498,22 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
       {/* ═══════════════════ PREMIUM LOCKED OFFERWALL CARDS ═══════════════════ */}
       {visibleSections.offerwalls && lockedConfigs.length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">
-              <Lock className="w-5 h-5 text-amber-400" />
-              Premium Locked Offerwalls
-            </h2>
-            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[8px] font-bold text-amber-400 font-mono flex items-center gap-1">
-              <Lock className="w-2.5 h-2.5" /> Locked
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 border border-amber-500/25 flex items-center justify-center">
+                <Lock className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-lg lg:text-xl font-bold text-white tracking-tight">
+                  Premium Locked Offerwalls
+                </h2>
+                <p className="text-[10px] text-slate-500 font-mono">Unlock premium offerwalls to earn more</p>
+              </div>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/15 to-orange-600/10 border border-amber-500/25 text-[8px] font-extrabold text-amber-400 font-mono tracking-wider flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              LOCKED
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -654,6 +658,16 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
             <span className="text-sm text-slate-300 font-mono">Verifying network security...</span>
           </div>
         </div>
+      )}
+
+      {/* ═══════════════════ OFFER DETAILS MODAL (Premium) ═══════════════════ */}
+      {viewingOfferDetails && (
+        <OfferDetailsModal
+          offer={viewingOfferDetails}
+          user={user}
+          onClose={() => setViewingOfferDetails(null)}
+          onRewardEarned={onRewardEarned}
+        />
       )}
 
       {/* ── VPN Block Fullscreen ── */}

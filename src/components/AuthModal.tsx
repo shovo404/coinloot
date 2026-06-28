@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus } from "lucide-react";
+import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus, CheckCircle } from "lucide-react";
 import { UserProfile } from "../types";
 import { getSupabaseClient } from "../lib/supabase";
-import { signUp, signIn, getProfile } from "../lib/supabaseService";
+import { signUp, signIn, getProfile, updateProfile } from "../lib/supabaseService";
+import { AVATAR_OPTIONS } from "../utils/avatarOptions";
 
 interface StoredAccount { email: string; password: string; username: string; profile: UserProfile; }
 
@@ -31,6 +32,10 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+  const [showAvatarSelect, setShowAvatarSelect] = useState(false);
+  const [pendingProfile, setPendingProfile] = useState<UserProfile | null>(null);
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [pendingPassword, setPendingPassword] = useState("");
   const modalRef = useRef<HTMLDivElement>(null);
   const initialLoadRef = useRef(true);
 
@@ -63,6 +68,10 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       setError("");
       setSuccessMsg("");
       setShowPassword(false);
+      setShowAvatarSelect(false);
+      setPendingProfile(null);
+      setPendingEmail("");
+      setPendingPassword("");
     }
   }, [isOpen]);
 
@@ -169,12 +178,14 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
           const profile = await getProfile(data.user.id);
           if (profile) {
             saveToAccounts(trimmedEmail, password, trimmedUsername, profile);
-            setSuccessMsg("Account created successfully! Signing you in...");
+            setSuccessMsg("Account created successfully! Choose your avatar...");
+            setPendingProfile(profile);
+            setPendingEmail(trimmedEmail);
+            setPendingPassword(password);
             setTimeout(() => {
-              onLogin(profile);
-              onClose();
-            }, 800);
-            setLoading(false);
+              setShowAvatarSelect(true);
+              setLoading(false);
+            }, 600);
             return;
           }
         }
@@ -200,6 +211,38 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     }
 
     setLoading(false);
+  };
+
+  const handleSelectAvatar = async (avatarUrl: string) => {
+    if (!pendingProfile) return;
+    setLoading(true);
+
+    try {
+      await updateProfile(pendingProfile.id, { avatar_url: avatarUrl });
+    } catch {
+      // Silently continue even if Supabase update fails
+    }
+
+    const updatedProfile: UserProfile = { ...pendingProfile, avatar_url: avatarUrl };
+
+    const accounts: StoredAccount[] = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const updatedAccounts = accounts.map((a) => {
+      if (a.profile.id === pendingProfile.id) {
+        return { ...a, profile: { ...a.profile, avatar_url: avatarUrl } };
+      }
+      return a;
+    });
+    localStorage.setItem("coinloot_accounts", JSON.stringify(updatedAccounts));
+
+    setLoading(false);
+    onLogin(updatedProfile);
+    onClose();
+  };
+
+  const handleSkipAvatar = () => {
+    if (!pendingProfile) return;
+    onLogin(pendingProfile);
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -235,6 +278,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         </div>
 
         {/* Tabs */}
+        {!showAvatarSelect && (
         <div className="flex mx-6 mt-5 bg-slate-900/60 p-1 rounded-xl border border-white/5">
           {[
             { id: "signin" as const, label: "Sign In", icon: LogIn },
@@ -262,8 +306,53 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             );
           })}
         </div>
+        )}
+
+        {/* Avatar Selection */}
+        {showAvatarSelect && pendingProfile && (
+          <div className="p-6 space-y-5 animate-fade-in overflow-y-auto">
+            <div className="text-center">
+              <h2 className="font-sans font-bold text-lg text-white">Choose Your Avatar</h2>
+              <p className="text-xs text-slate-400 mt-1">Pick an avatar or skip to use your initial</p>
+            </div>
+            <div className="grid grid-cols-3 gap-4 max-h-[320px] overflow-y-auto pr-1">
+              {AVATAR_OPTIONS.map((avatar) => (
+                <button
+                  key={avatar.id}
+                  type="button"
+                  onClick={() => handleSelectAvatar(avatar.svg)}
+                  className="group relative rounded-2xl overflow-hidden border-2 border-transparent hover:border-cyan-400 hover:scale-105 transition-all duration-200 bg-white/5 hover:bg-white/10"
+                  title={avatar.name}
+                >
+                  <img src={avatar.svg} alt={avatar.name} className="w-full h-auto" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-2xl">
+                    <CheckCircle className="w-8 h-8 text-cyan-400 drop-shadow-lg" />
+                  </div>
+                  <span className="block text-[9px] text-center text-slate-500 font-mono mt-0.5 pb-1">{avatar.name}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleSkipAvatar}
+                className="flex-1 py-3 rounded-2xl border border-white/10 text-slate-400 hover:text-white hover:border-white/20 transition-all text-xs font-semibold"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectAvatar(pendingProfile.avatar_url || AVATAR_OPTIONS[0].svg)}
+                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-xs tracking-wide shadow-lg shadow-cyan-500/10 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <CheckCircle className="w-4 h-4" /> Continue
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Form */}
+        {!showAvatarSelect && (
         <form onSubmit={activeTab === "signin" ? handleSignIn : handleSignUp} className="p-4 sm:p-6 pt-4 space-y-4 overflow-y-auto">
           {/* Username field (Sign Up only) */}
           {activeTab === "signup" && (
@@ -424,6 +513,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             )}
           </p>
         </form>
+        )}
       </div>
     </div>
   );

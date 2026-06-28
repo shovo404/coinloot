@@ -464,6 +464,13 @@ export async function getOffers(): Promise<any[]> {
   if (val) {
     try { return JSON.parse(val); } catch {}
   }
+  // Fallback to localStorage when Supabase is unavailable
+  try {
+    const saved = localStorage.getItem("coinloot_offers");
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch {}
   return [];
 }
 
