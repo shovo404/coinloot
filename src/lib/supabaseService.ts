@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabase";
 import { UserProfile, WithdrawalRequest, PromoCode } from "../types";
+import { calcLevel } from "../utils/levelSystem";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ export async function signUp(email: string, password: string, username: string) 
       total_earned_coins: 0,
       kyc_status: "NOT_STARTED",
       is_admin: false,
+      role: 'user',
       vpn_detected: false,
     });
     if (profileError) throw profileError;
@@ -106,6 +108,9 @@ export async function updateProfile(
   if (updates.restricted_at !== undefined) dbUpdates.restricted_at = updates.restricted_at;
   if (updates.restricted_by !== undefined) dbUpdates.restricted_by = updates.restricted_by;
   if (updates.restriction_notes !== undefined) dbUpdates.restriction_notes = updates.restriction_notes;
+  if (updates.registration_ip !== undefined) dbUpdates.registration_ip = updates.registration_ip;
+  if (updates.registration_country !== undefined) dbUpdates.registration_country = updates.registration_country;
+  if (updates.registration_isp !== undefined) dbUpdates.registration_isp = updates.registration_isp;
 
   const { error } = await sb.from("profiles").update(dbUpdates).eq("id", userId);
   if (error) throw error;
@@ -142,6 +147,7 @@ function mapDbProfileToUserProfile(data: any): UserProfile {
     kyc_status: data.kyc_status || "NOT_STARTED",
     kyc_required: data.kyc_required ?? false,
     is_admin: data.is_admin || false,
+    role: data.role || (data.is_admin ? 'admin' : 'user'),
     vpn_detected: data.vpn_detected || false,
     device_fingerprint: data.device_fingerprint || "",
     country: data.country || "",
@@ -155,6 +161,7 @@ function mapDbProfileToUserProfile(data: any): UserProfile {
     restricted_at: data.restricted_at || undefined,
     restricted_by: data.restricted_by || undefined,
     restriction_notes: data.restriction_notes || undefined,
+    created_at: data.created_at || undefined,
   };
 }
 
@@ -176,6 +183,7 @@ export async function addCoins(
 
   const newBalance = profile.balance_coins + amount;
   const newTotalEarned = profile.total_earned_coins + amount;
+  const newLevel = calcLevel(newTotalEarned);
 
   // Update profile
   await sb
@@ -184,6 +192,7 @@ export async function addCoins(
       balance_coins: newBalance,
       balance_usd: newBalance / 1000,
       total_earned_coins: newTotalEarned,
+      level: newLevel,
     })
     .eq("id", userId);
 

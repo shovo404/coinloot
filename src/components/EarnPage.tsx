@@ -19,11 +19,12 @@ import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedO
 import LockedOfferwallCard from "./LockedOfferwallCard";
 import OfferDetailsModal from "./OfferDetailsModal";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
+import { calcLevel } from "../utils/levelSystem";
 
 interface EarnPageProps {
   user: UserProfile;
   setUser: (u: UserProfile) => void;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
   simulationCountry?: string;
 }
 
@@ -73,7 +74,7 @@ function evaluateLockRules(user: UserProfile, rules: LockRule[]): { locked: bool
   for (const rule of rules) {
     if (rule.type === "coins_earned" && user.total_earned_coins < rule.value)
       return { locked: true, reason: `Earn ${rule.value.toLocaleString()} total coins to unlock` };
-    if (rule.type === "level" && user.level < rule.value)
+    if (rule.type === "level" && calcLevel(user.balance_coins) < rule.value)
       return { locked: true, reason: `Reach Level ${rule.value} to unlock` };
     if (rule.type === "tasks_completed" && (user.total_earned_coins / 100) < rule.value)
       return { locked: true, reason: `Complete ${rule.value} tasks to unlock` };
@@ -188,34 +189,39 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
       return;
     }
 
-    // ── Offerwall VPN Protection ──
-    const settings = getVpnSettings();
-    if (settings.offerwallBlock) {
-      setVpnCheckingOffer(true);
-      try {
-        const vpnResult = await checkVpnStatus();
-        logDetection(user.id, user.username, vpnResult);
-        if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
-          setVpnBlockedOfferwall(true);
-          setVpnCheckingOffer(false);
-          return;
-        }
-      } catch { /* allow through */ }
-      setVpnCheckingOffer(false);
+    // ── Offerwall VPN Protection (skip for admins) ──
+    if (user.role !== 'admin') {
+      const settings = getVpnSettings();
+      if (settings.offerwallBlock) {
+        setVpnCheckingOffer(true);
+        try {
+          const vpnResult = await checkVpnStatus();
+          logDetection(user.id, user.username, vpnResult);
+          if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
+            setVpnBlockedOfferwall(true);
+            setVpnCheckingOffer(false);
+            return;
+          }
+        } catch { /* allow through */ }
+        setVpnCheckingOffer(false);
+      }
     }
 
     setViewingOffer(offer);
   };
 
   const completeOfferSimulator = (offer: Offer) => {
-    setSubmitting(true);
+    // ── KYC Check ──
+    if (user.kyc_required && user.kyc_status !== "APPROVED") {
+      alert("KYC verification is required before completing offers. Please complete KYC verification first.");
+      setSubmitting(false);
+      return;
+    }
     setTimeout(() => {
       const pay = offer.payout_coins;
       const progressXp = offer.difficulty === "Easy" ? 50 : offer.difficulty === "Medium" ? 150 : 350;
-      const newXp = user.xp + progressXp;
-      setUser({ ...user, xp: newXp, level: Math.floor(newXp / 1000) + 1 });
       playCoinSound();
-      onRewardEarned(pay, offer.provider, `Completed ${offer.title} from ${offer.provider}.`);
+      onRewardEarned(pay, offer.provider, `Completed ${offer.title} from ${offer.provider}.`, progressXp);
       setSubmitting(false);
       setViewingOffer(null);
     }, 1800);
@@ -683,6 +689,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
             </p>
             <button onClick={async () => {
               setVpnBlockedOfferwall(false);
+              if (user.role === 'admin') return;
               const settings = getVpnSettings();
               if (settings.offerwallBlock) {
                 setVpnCheckingOffer(true);
@@ -731,7 +738,7 @@ function CountdownTimer({ expiresAt }: { expiresAt: string }) {
   );
 }
 
-function NotificationCards({ user, setUser, onRewardEarned, globalPromo }: { user: UserProfile; setUser: (u: UserProfile) => void; onRewardEarned?: (coins: number, sourceName: string, message?: string) => void; globalPromo: any }) {
+function NotificationCards({ user, setUser, onRewardEarned, globalPromo }: { user: UserProfile; setUser: (u: UserProfile) => void;   onRewardEarned?: (coins: number, sourceName: string, message?: string, xpGained?: number) => void; globalPromo: any }) {
   const notifText = globalPromo?.text || "";
   const promoEnabled = globalPromo?.promoEnabled || false;
   const promoCode = globalPromo?.promoCode || "";
@@ -803,13 +810,6 @@ function NotificationCards({ user, setUser, onRewardEarned, globalPromo }: { use
                       if (list.includes(promoCode)) { setClaimed(true); return; }
                       list.push(promoCode);
                       localStorage.setItem("coinloot_claimed_promos", JSON.stringify(list));
-                      const newBalance = user.balance_coins + promoCoins;
-                      setUser({
-                        ...user,
-                        balance_coins: newBalance,
-                        balance_usd: newBalance / 1000,
-                        total_earned_coins: user.total_earned_coins + promoCoins,
-                      });
                       playCoinSound();
                       onRewardEarned?.(promoCoins, "Promo Code", `Promo code "${promoCode}" redeemed! +${promoCoins.toLocaleString()} coins credited.`);
                       setClaimed(true);

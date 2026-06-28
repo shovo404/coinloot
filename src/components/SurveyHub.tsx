@@ -21,7 +21,7 @@ interface Survey {
 interface SurveyHubProps {
   user: UserProfile;
   setUser: (u: UserProfile) => void;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
   simulationCountry: string;
 }
 
@@ -139,15 +139,7 @@ export default function SurveyHub({ user, setUser, onRewardEarned, simulationCou
     setTimeout(() => {
       const payout = survey.rewardCoins;
       const xpReward = Math.round(survey.estimatedMinutes * 15);
-      const newXp = user.xp + xpReward;
-
-      setUser({
-        ...user,
-        xp: newXp,
-        level: Math.floor(newXp / 1000) + 1,
-      });
-
-      onRewardEarned(payout, `${survey.provider}`, `Completed ${survey.title} and earned ${payout.toLocaleString()} coins.`);
+      onRewardEarned(payout, `${survey.provider}`, `Completed ${survey.title} and earned ${payout.toLocaleString()} coins.`, xpReward);
       setCompletingState(false);
       setTakingSurvey(null);
       alert(`Consensus Verified! You earned +${payout.toLocaleString()} coins for completed ${survey.provider} survey!`);

@@ -10,12 +10,18 @@ import {
   Calendar, UserPlus, ExternalLink, MoreHorizontal, HardDrive, Signal, Circle,
   Sun, Moon, List, LayoutGrid, ArrowUpRight, ArrowDownRight, Gauge, Mail, History,
   ArrowLeft, MessageSquare, ChevronRight, User,
-  Megaphone, Database,
+  Megaphone, Database, ZoomIn,
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, SiteSettings, WithdrawalMethodConfig } from "../types";
 import { Ticket } from "./SupportTicket";
+import VpnApiConfigSection from "./VpnApiConfigSection";
+import AdminNotificationCenter from "./AdminNotificationCenter";
+import AdminNotificationPrefs from "./AdminNotificationPrefs";
 import { playCoinSound } from "../utils/coinSound";
-import { restrictUser, unRestrictUser, banUser, unbanUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs } from "../utils/vpnDetector";
+import { restrictUser, unRestrictUser, banUser, unbanUser, getRestrictedUsers, getDetectionHistory, getIpLogs, getRestrictionHistory, isUserRestricted, logRestrictionHistory, extendRestriction, clearDetectionLogs, VpnDetectionLog, RestrictionHistoryEntry, UserIpLog, getVpnSettings, saveVpnSettings, getUserIpLogs, getAutoRestrictRules, saveAutoRestrictRules, AutoRestrictRules } from "../utils/vpnDetector";
+import { getAllKycRecords, getKycStats, getKycRecord, approveKycByUserId, rejectKycByUserId, fetchAllKycRecordsFromServer, KycRecord } from "../utils/kycEngine";
+import { getTickerSettings, saveTickerSettings, TickerSettings } from "../utils/activityFeed";
+import { createAdminNotification, NotificationPriority } from "../utils/adminNotifier";
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
@@ -27,10 +33,11 @@ import {
   resetSocialBountyToDefaults, resetWeeklyChallengeToDefaults,
   SocialBountyConfig, WeeklyChallengeConfig 
 } from "../utils/rewardsConfig";
+import { calcLevel, levelProgress, getLevelTitle } from "../utils/levelSystem";
 
 interface AdminPanelProps {
   user: UserProfile;
-  onRewardEarned?: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned?: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
   activeSection?: string;
   onSectionChange?: (id: string) => void;
 }
@@ -701,25 +708,58 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [viewingKyc, setViewingKyc] = useState<any>(null);
 
+  // ── KYC Section State (unconditional hooks – never inside renderSection) ──
+  const [kycActionModal, setKycActionModal] = useState<{ userId: string; username: string; email: string; action: "APPROVED" | "REJECTED" } | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectAndRestrict, setRejectAndRestrict] = useState(false);
+  const [zoomImageKyc, setZoomImageKyc] = useState<string | null>(null);
+  const [serverRecords, setServerRecords] = useState<KycRecord[] | null>(null);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+
+  const loadServerRecords = useCallback(async () => {
+    setLoadingRecords(true);
+    const records = await fetchAllKycRecordsFromServer();
+    setServerRecords(records);
+    setLoadingRecords(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "kyc") loadServerRecords();
+  }, [activeSection, loadServerRecords]);
+
   // ── Homepage Sections State ──
-  const loadHomepageSections = () => {
+  const [homepageSections, setHomepageSections] = useState({ featured: true, hot: true, surveys: true, offerwalls: true });
+
+  // Load homepage sections from DB, fallback to localStorage
+  const loadHomepageSections = async () => {
+    try {
+      const dbSections = await AdminDb.getHomepageSections();
+      if (dbSections) {
+        setHomepageSections(dbSections);
+        localStorage.setItem("coinloot_homepage_sections", JSON.stringify(dbSections));
+        return;
+      }
+    } catch {}
     try {
       const saved = localStorage.getItem("coinloot_homepage_sections");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setHomepageSections(parsed);
+        return;
+      }
     } catch {}
-    return { featured: true, hot: true, surveys: true, offerwalls: true };
   };
-  const [homepageSections, setHomepageSections] = useState(loadHomepageSections);
 
-  // Re-read homepage sections from localStorage when section changes to "homepage"
+  // Load from DB when section changes to "homepage"
   useEffect(() => {
     if (activeSection === "homepage") {
-      setHomepageSections(loadHomepageSections());
+      loadHomepageSections();
     }
   }, [activeSection]);
 
   // ── VPN Protection Settings ──
   const [vpnSettings, setVpnSettings] = useState(getVpnSettings);
+  const [autoRestrictRules, setAutoRestrictRules] = useState<AutoRestrictRules>(getAutoRestrictRules);
 
   // ── Locked Offers Rules State ──
   const [rules, setRules] = useState<{ id: string; name: string; type: string; value: number }[]>(() => {
@@ -820,6 +860,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [ipLimitMax, setIpLimitMax] = useState(() => {
     try { return JSON.parse(localStorage.getItem("coinloot_ip_limit_settings") || '{"enabled":false,"maxAccounts":3}').maxAccounts; } catch { return 3; }
   });
+
+  // ── Live Activity Ticker Settings ──
+  const [tickerAdminSettings, setTickerAdminSettings] = useState<TickerSettings>(() => getTickerSettings());
 
   const saveIpLimitSettings = (enabled: boolean, maxAccounts: number) => {
     localStorage.setItem("coinloot_ip_limit_settings", JSON.stringify({ enabled, maxAccounts }));
@@ -944,6 +987,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     showNotif("success", "Settings saved!");
   };
 
+  // ── Delete User State ──
+  const [deleteModal, setDeleteModal] = useState<{ userId: string; username: string; email: string; balance: string } | null>(null);
+
   // ── Restrict User State ──
   const [restrictModal, setRestrictModal] = useState<{ userId: string; username: string } | null>(null);
   const [restrictDuration, setRestrictDuration] = useState(30);
@@ -955,26 +1001,27 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [restrictNote, setRestrictNote] = useState("");
   const [countdownTick, setCountdownTick] = useState(Date.now());
   const [profilesRefreshKey, setProfilesRefreshKey] = useState(0);
+  const [withdrawalsRefreshKey, setWithdrawalsRefreshKey] = useState(0);
 
   // Seed demo accounts + admin if needed
   useEffect(() => {
     const existing = getAccounts();
     const hasAdmin = existing.some((a) => a.email === "coinlootadmin@gmail.com");
-    const adminEntry: StoredAccount = { email: "coinlootadmin@gmail.com", password: "Coinloot@#admin@#", username: "Admin", profile: { id: `demo-${Date.now()}-11`, username: "Admin", email: "coinlootadmin@gmail.com", balance_coins: 0, balance_usd: 0, xp: 0, level: 1, streak_days: 0, referred_by: null, referrals_count: 0, total_earned_coins: 0, total_withdrawn_usd: 0, kyc_status: "APPROVED", kyc_required: false, is_admin: true, vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } };
+    const adminEntry: StoredAccount = { email: "coinlootadmin@gmail.com", password: "Coinloot@#admin@#", username: "Admin", profile: { id: `demo-${Date.now()}-11`, username: "Admin", email: "coinlootadmin@gmail.com", balance_coins: 0, balance_usd: 0, xp: 0, level: 1, streak_days: 0, referred_by: null, referrals_count: 0, total_earned_coins: 0, total_withdrawn_usd: 0, kyc_status: "APPROVED", kyc_required: false, is_admin: true, role: 'admin', vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } };
 
     if (existing.length === 0) {
       const demos: StoredAccount[] = [
         adminEntry,
-        { email: "alice@demo.com", password: "Demo@123", username: "Alice", profile: { id: `demo-${Date.now()}-1`, username: "Alice", email: "alice@demo.com", balance_coins: 45200, balance_usd: 45.2, xp: 8400, level: 12, streak_days: 7, referred_by: null, referrals_count: 3, total_earned_coins: 124500, total_withdrawn_usd: 79.3, kyc_status: "APPROVED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } },
-        { email: "bob@demo.com", password: "Demo@123", username: "Bob", profile: { id: `demo-${Date.now()}-2`, username: "Bob", email: "bob@demo.com", balance_coins: 18200, balance_usd: 18.2, xp: 3200, level: 7, streak_days: 3, referred_by: "Alice", referrals_count: 1, total_earned_coins: 56200, total_withdrawn_usd: 38.0, kyc_status: "APPROVED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "GB", is_banned: false } },
-        { email: "charlie@demo.com", password: "Demo@123", username: "Charlie", profile: { id: `demo-${Date.now()}-3`, username: "Charlie", email: "charlie@demo.com", balance_coins: 6800, balance_usd: 6.8, xp: 1500, level: 4, streak_days: 1, referred_by: "Alice", referrals_count: 0, total_earned_coins: 22100, total_withdrawn_usd: 15.3, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "BD", is_banned: false } },
-        { email: "diana@demo.com", password: "Demo@123", username: "Diana", profile: { id: `demo-${Date.now()}-4`, username: "Diana", email: "diana@demo.com", balance_coins: 1200, balance_usd: 1.2, xp: 400, level: 2, streak_days: 0, referred_by: null, referrals_count: 0, total_earned_coins: 4500, total_withdrawn_usd: 3.3, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "IN", is_banned: false } },
-        { email: "eve@demo.com", password: "Demo@123", username: "Eve", profile: { id: `demo-${Date.now()}-5`, username: "Eve", email: "eve@demo.com", balance_coins: 34500, balance_usd: 34.5, xp: 7200, level: 10, streak_days: 5, referred_by: null, referrals_count: 5, total_earned_coins: 98000, total_withdrawn_usd: 63.5, kyc_status: "APPROVED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "PH", is_banned: false } },
-        { email: "frank@demo.com", password: "Demo@123", username: "Frank", profile: { id: `demo-${Date.now()}-6`, username: "Frank", email: "frank@demo.com", balance_coins: 2500, balance_usd: 2.5, xp: 800, level: 3, streak_days: 0, referred_by: "Eve", referrals_count: 0, total_earned_coins: 8900, total_withdrawn_usd: 6.4, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "NG", is_banned: false } },
-        { email: "grace@demo.com", password: "Demo@123", username: "Grace", profile: { id: `demo-${Date.now()}-7`, username: "Grace", email: "grace@demo.com", balance_coins: 91000, balance_usd: 91.0, xp: 15600, level: 18, streak_days: 12, referred_by: null, referrals_count: 8, total_earned_coins: 286000, total_withdrawn_usd: 195.0, kyc_status: "APPROVED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } },
-        { email: "henry@demo.com", password: "Demo@123", username: "Henry", profile: { id: `demo-${Date.now()}-8`, username: "Henry", email: "henry@demo.com", balance_coins: 7800, balance_usd: 7.8, xp: 2800, level: 6, streak_days: 2, referred_by: "Grace", referrals_count: 1, total_earned_coins: 33400, total_withdrawn_usd: 25.6, kyc_status: "PENDING", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "CA", is_banned: false } },
-        { email: "ivy@demo.com", password: "Demo@123", username: "Ivy", profile: { id: `demo-${Date.now()}-9`, username: "Ivy", email: "ivy@demo.com", balance_coins: 22000, balance_usd: 22.0, xp: 5100, level: 8, streak_days: 4, referred_by: null, referrals_count: 2, total_earned_coins: 74500, total_withdrawn_usd: 52.5, kyc_status: "APPROVED", kyc_required: false, is_admin: false, vpn_detected: false, device_fingerprint: "", country: "AU", is_banned: false } },
-        { email: "jack@demo.com", password: "Demo@123", username: "Jack", profile: { id: `demo-${Date.now()}-10`, username: "Jack", email: "jack@demo.com", balance_coins: 150, balance_usd: 0.15, xp: 50, level: 1, streak_days: 0, referred_by: "Ivy", referrals_count: 0, total_earned_coins: 200, total_withdrawn_usd: 0, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, vpn_detected: true, device_fingerprint: "", country: "VN", is_banned: false } },
+        { email: "alice@demo.com", password: "Demo@123", username: "Alice", profile: { id: `demo-${Date.now()}-1`, username: "Alice", email: "alice@demo.com", balance_coins: 45200, balance_usd: 45.2, xp: 8400, level: 12, streak_days: 7, referred_by: null, referrals_count: 3, total_earned_coins: 124500, total_withdrawn_usd: 79.3, kyc_status: "APPROVED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } },
+        { email: "bob@demo.com", password: "Demo@123", username: "Bob", profile: { id: `demo-${Date.now()}-2`, username: "Bob", email: "bob@demo.com", balance_coins: 18200, balance_usd: 18.2, xp: 3200, level: 7, streak_days: 3, referred_by: "Alice", referrals_count: 1, total_earned_coins: 56200, total_withdrawn_usd: 38.0, kyc_status: "APPROVED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "GB", is_banned: false } },
+        { email: "charlie@demo.com", password: "Demo@123", username: "Charlie", profile: { id: `demo-${Date.now()}-3`, username: "Charlie", email: "charlie@demo.com", balance_coins: 6800, balance_usd: 6.8, xp: 1500, level: 4, streak_days: 1, referred_by: "Alice", referrals_count: 0, total_earned_coins: 22100, total_withdrawn_usd: 15.3, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "BD", is_banned: false } },
+        { email: "diana@demo.com", password: "Demo@123", username: "Diana", profile: { id: `demo-${Date.now()}-4`, username: "Diana", email: "diana@demo.com", balance_coins: 1200, balance_usd: 1.2, xp: 400, level: 2, streak_days: 0, referred_by: null, referrals_count: 0, total_earned_coins: 4500, total_withdrawn_usd: 3.3, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "IN", is_banned: false } },
+        { email: "eve@demo.com", password: "Demo@123", username: "Eve", profile: { id: `demo-${Date.now()}-5`, username: "Eve", email: "eve@demo.com", balance_coins: 34500, balance_usd: 34.5, xp: 7200, level: 10, streak_days: 5, referred_by: null, referrals_count: 5, total_earned_coins: 98000, total_withdrawn_usd: 63.5, kyc_status: "APPROVED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "PH", is_banned: false } },
+        { email: "frank@demo.com", password: "Demo@123", username: "Frank", profile: { id: `demo-${Date.now()}-6`, username: "Frank", email: "frank@demo.com", balance_coins: 2500, balance_usd: 2.5, xp: 800, level: 3, streak_days: 0, referred_by: "Eve", referrals_count: 0, total_earned_coins: 8900, total_withdrawn_usd: 6.4, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "NG", is_banned: false } },
+        { email: "grace@demo.com", password: "Demo@123", username: "Grace", profile: { id: `demo-${Date.now()}-7`, username: "Grace", email: "grace@demo.com", balance_coins: 91000, balance_usd: 91.0, xp: 15600, level: 18, streak_days: 12, referred_by: null, referrals_count: 8, total_earned_coins: 286000, total_withdrawn_usd: 195.0, kyc_status: "APPROVED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "US", is_banned: false } },
+        { email: "henry@demo.com", password: "Demo@123", username: "Henry", profile: { id: `demo-${Date.now()}-8`, username: "Henry", email: "henry@demo.com", balance_coins: 7800, balance_usd: 7.8, xp: 2800, level: 6, streak_days: 2, referred_by: "Grace", referrals_count: 1, total_earned_coins: 33400, total_withdrawn_usd: 25.6, kyc_status: "PENDING", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "CA", is_banned: false } },
+        { email: "ivy@demo.com", password: "Demo@123", username: "Ivy", profile: { id: `demo-${Date.now()}-9`, username: "Ivy", email: "ivy@demo.com", balance_coins: 22000, balance_usd: 22.0, xp: 5100, level: 8, streak_days: 4, referred_by: null, referrals_count: 2, total_earned_coins: 74500, total_withdrawn_usd: 52.5, kyc_status: "APPROVED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: false, device_fingerprint: "", country: "AU", is_banned: false } },
+        { email: "jack@demo.com", password: "Demo@123", username: "Jack", profile: { id: `demo-${Date.now()}-10`, username: "Jack", email: "jack@demo.com", balance_coins: 150, balance_usd: 0.15, xp: 50, level: 1, streak_days: 0, referred_by: "Ivy", referrals_count: 0, total_earned_coins: 200, total_withdrawn_usd: 0, kyc_status: "NOT_STARTED", kyc_required: false, is_admin: false, role: 'user', vpn_detected: true, device_fingerprint: "", country: "VN", is_banned: false } },
       ];
       localStorage.setItem("coinloot_accounts", JSON.stringify(demos));
     } else if (!hasAdmin) {
@@ -986,17 +1033,38 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   // Re-read accounts from localStorage when storage changes (cross-tab) or on focus
   useEffect(() => {
-    const handler = () => setProfilesRefreshKey((k) => k + 1);
+    const handler = (e: StorageEvent) => {
+      setProfilesRefreshKey((k) => k + 1);
+      if (e.key === "coinloot_withdrawals_v3") {
+        setWithdrawalsRefreshKey(k => k + 1);
+      }
+    };
+    const focusHandler = () => {
+      setProfilesRefreshKey((k) => k + 1);
+      setWithdrawalsRefreshKey(k => k + 1);
+    };
+    const wdHandler = () => setWithdrawalsRefreshKey(k => k + 1);
     window.addEventListener("storage", handler);
-    window.addEventListener("focus", handler);
-    window.addEventListener("user-registered", handler);
+    window.addEventListener("focus", focusHandler);
+    window.addEventListener("user-registered", () => setProfilesRefreshKey((k) => k + 1));
+    window.addEventListener("withdrawal-status-changed", wdHandler);
     return () => {
       window.removeEventListener("storage", handler);
-      window.removeEventListener("focus", handler);
-      window.removeEventListener("user-registered", handler);
+      window.removeEventListener("focus", focusHandler);
+      window.removeEventListener("user-registered", () => setProfilesRefreshKey((k) => k + 1));
+      window.removeEventListener("withdrawal-status-changed", wdHandler);
     };
   }, []);
   useEffect(() => { const i = setInterval(() => setCountdownTick(Date.now()), 1000); return () => clearInterval(i); }, []);
+
+  // ── Refresh admin notifications from localStorage ──
+  useEffect(() => {
+    const refresh = () => {
+      try { setAdminNotifs(JSON.parse(localStorage.getItem("coinloot_admin_notifications") || "[]")); } catch {}
+    };
+    const i = setInterval(refresh, 3000);
+    return () => clearInterval(i);
+  }, []);
 
   // ── Supabase Profiles Sync ──
   const [supabaseProfiles, setSupabaseProfiles] = useState<UserProfile[]>([]);
@@ -1025,6 +1093,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
             kyc_status: r.kyc_status || "NOT_STARTED",
             kyc_required: r.kyc_required ?? false,
             is_admin: false,
+            role: 'user',
             vpn_detected: false,
             device_fingerprint: "",
             country: r.country || "",
@@ -1062,6 +1131,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         kyc_status: row.kyc_status || "NOT_STARTED",
         kyc_required: row.kyc_required ?? false,
         is_admin: row.is_admin || false,
+        role: row.role || (row.is_admin ? 'admin' : 'user'),
         vpn_detected: row.vpn_detected || false,
         device_fingerprint: row.device_fingerprint || "",
         country: row.country || "",
@@ -1223,7 +1293,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   }, [accounts, supabaseProfiles]);
   const withdrawals = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("coinloot_withdrawals_v3") || "[]") as WithdrawalRequest[]; } catch { return []; }
-  }, [activeSection]);
+  }, [activeSection, withdrawalsRefreshKey]);
 
   // ── Computed Stats ──
   const stats = useMemo(() => {
@@ -1253,7 +1323,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const addUserNotification = async (userId: string, title: string, description: string, category: string, coins?: number) => {
     try {
       const notifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
-      notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, title, description, time: new Date().toISOString(), category, unread: true, coinsEarned: coins });
+      notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, user_id: userId, title, description, time: new Date().toISOString(), category, unread: true, coinsEarned: coins });
       localStorage.setItem("coinloot_notifications", JSON.stringify(notifs));
     } catch { /* */ }
     // Also write to Supabase notifications table for real-time sync
@@ -1299,6 +1369,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     accs[idx].profile.balance_coins += amount;
     accs[idx].profile.total_earned_coins += amount;
     accs[idx].profile.balance_usd = accs[idx].profile.balance_coins / 1000;
+    accs[idx].profile.level = calcLevel(accs[idx].profile.balance_coins);
     saveAccounts(accs);
     addLog("COIN_ADDED", "user", targetId, `Added ${amount} coins. Reason: ${reason}`);
     addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
@@ -1309,6 +1380,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         p.balance_coins += amount;
         p.total_earned_coins += amount;
         p.balance_usd = p.balance_coins / 1000;
+        p.level = calcLevel(p.balance_coins);
         localStorage.setItem("coinloot_profile_v3", JSON.stringify(p));
       }
       playCoinSound();
@@ -1342,6 +1414,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     const deduct = Math.min(amount, accs[idx].profile.balance_coins);
     accs[idx].profile.balance_coins -= deduct;
     accs[idx].profile.balance_usd = accs[idx].profile.balance_coins / 1000;
+    accs[idx].profile.level = calcLevel(accs[idx].profile.balance_coins);
     saveAccounts(accs);
     addLog("COIN_DEDUCTED", "user", targetId, `Deducted ${deduct} coins. Reason: ${reason}`);
     addUserNotification(targetId, `${deduct.toLocaleString()} Coins Deducted`, `${deduct.toLocaleString()} coins were deducted. Reason: ${reason || "Admin adjustment"}`, "system");
@@ -1351,6 +1424,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         const p = JSON.parse(saved);
         p.balance_coins -= deduct;
         p.balance_usd = p.balance_coins / 1000;
+        p.level = calcLevel(p.balance_coins);
         localStorage.setItem("coinloot_profile_v3", JSON.stringify(p));
       }
     }
@@ -1385,22 +1459,93 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   const handleDeleteUser = async (targetId: string) => {
     const sb = getSupabaseClient();
+
+    // — Supabase cleanup —
     if (sb) {
-      try {
-        await sb.from("profiles").delete().eq("id", targetId);
-        addLog("USER_DELETED", "user", targetId, "Deleted user account");
-        showNotif("success", "User deleted");
-        setProfilesRefreshKey(k => k + 1);
-        return;
-      } catch {}
+      const tables = ["profiles", "withdrawals", "support_tickets", "kyc_records", "notifications", "earnings_history"];
+      for (const table of tables) {
+        try { await sb.from(table).delete().eq("id", targetId); } catch {}
+        try { await sb.from(table).delete().eq("user_id", targetId); } catch {}
+      }
     }
+
+    // — localStorage cleanup —
+    // Remove from accounts
     const accs = getAccounts().filter((a) => a.profile.id !== targetId);
     saveAccounts(accs);
-    addLog("USER_DELETED", "user", targetId, "Deleted user account");
-    showNotif("success", "User deleted");
+
+    // Remove from user profiles list
+    try {
+      const profiles = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
+      localStorage.setItem("coinloot_user_profiles", JSON.stringify(profiles.filter((p: any) => p.id !== targetId)));
+    } catch {}
+
+    // Remove from restricted users
+    try {
+      const restricted = JSON.parse(localStorage.getItem("coinloot_restricted_users_v2") || "[]");
+      localStorage.setItem("coinloot_restricted_users_v2", JSON.stringify(restricted.filter((r: any) => r.userId !== targetId)));
+    } catch {}
+
+    // Remove from banned users
+    try {
+      const banned = JSON.parse(localStorage.getItem("coinloot_banned_users") || "[]");
+      localStorage.setItem("coinloot_banned_users", JSON.stringify(banned.filter((b: string) => b !== targetId)));
+    } catch {}
+
+    // Remove from detection history
+    try {
+      const detections = JSON.parse(localStorage.getItem("coinloot_vpn_detection_logs") || "[]");
+      localStorage.setItem("coinloot_vpn_detection_logs", JSON.stringify(detections.filter((d: any) => d.userId !== targetId)));
+    } catch {}
+
+    // Remove user-specific notifications
+    try {
+      const notifs = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+      localStorage.setItem("coinloot_notifications", JSON.stringify(notifs.filter((n: any) => n.user_id !== targetId)));
+    } catch {}
+
+    // Remove support tickets
+    try {
+      const tickets = JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]");
+      const userTickets = tickets.filter((t: any) => t.userId !== targetId && t.user_id !== targetId);
+      localStorage.setItem("coinloot_support_tickets", JSON.stringify(userTickets));
+      // Remove ticket messages
+      for (const t of tickets) {
+        if (t.userId === targetId || t.user_id === targetId) {
+          localStorage.removeItem(`coinloot_support_tickets_messages_${t.id}`);
+        }
+      }
+    } catch {}
+
+    // Remove KYC records
+    try {
+      const kycRecords = JSON.parse(localStorage.getItem("coinloot_kyc_records") || "[]");
+      localStorage.setItem("coinloot_kyc_records", JSON.stringify(kycRecords.filter((k: any) => k.userId !== targetId)));
+    } catch {}
+
+    // Remove from IP logs
+    try {
+      const ipLogs = JSON.parse(localStorage.getItem("coinloot_ip_logs") || "[]");
+      localStorage.setItem("coinloot_ip_logs", JSON.stringify(ipLogs.filter((l: any) => l.userId !== targetId)));
+    } catch {}
+
+    // Remove restriction history entries
+    try {
+      const rh = JSON.parse(localStorage.getItem("coinloot_restriction_history") || "[]");
+      localStorage.setItem("coinloot_restriction_history", JSON.stringify(rh.filter((e: any) => e.userId !== targetId)));
+    } catch {}
+
+    addLog("USER_DELETED", "user", targetId, "Deleted user account with full cleanup");
+    setProfilesRefreshKey(k => k + 1);
+    setDeleteModal(null);
+    showNotif("success", "User permanently deleted");
   };
 
   const handleUpdateProfile = async (targetId: string, updates: Partial<UserProfile>) => {
+    // If balance_coins changed, recalculate level
+    if (updates.balance_coins !== undefined) {
+      updates.level = calcLevel(updates.balance_coins);
+    }
     const sb = getSupabaseClient();
     if (sb) {
       try {
@@ -1454,14 +1599,31 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     const wds: WithdrawalRequest[] = JSON.parse(localStorage.getItem("coinloot_withdrawals_v3") || "[]");
     const idx = wds.findIndex((w) => w.id === wdId);
     if (idx === -1) return showNotif("error", "Withdrawal not found");
-    
+
     const withdrawal = wds[idx];
-    const oldStatus = withdrawal.status;
     withdrawal.status = newStatus as any;
     localStorage.setItem("coinloot_withdrawals_v3", JSON.stringify(wds));
     addLog("WITHDRAWAL_" + newStatus, "withdrawal", wdId, `Withdrawal ${newStatus}: ${withdrawal.username} - $${withdrawal.usd_value}`);
-    
-    
+
+    // Sync to Supabase
+    AdminDb.updateWithdrawalStatusAdmin(wdId, newStatus).catch(() => {});
+
+    // Notify user
+    if (newStatus === "APPROVED" || newStatus === "PAID") {
+      addUserNotification(withdrawal.user_id, "✅ Withdrawal Approved", "Your withdrawal request has been approved successfully.", "system");
+    } else if (newStatus === "REJECTED") {
+      addUserNotification(withdrawal.user_id, "❌ Withdrawal Rejected", "Your withdrawal request has been rejected.", "system");
+    }
+
+    // Dispatch custom event so user panel and other sessions update instantly
+    try {
+      window.dispatchEvent(new CustomEvent("withdrawal-status-changed", {
+        detail: { withdrawalId: wdId, userId: withdrawal.user_id, newStatus, oldStatus: withdrawal.status }
+      }));
+    } catch {}
+
+    // Force re-render of withdrawals list and dashboard counters
+    setWithdrawalsRefreshKey(k => k + 1);
     showNotif("success", `Withdrawal ${newStatus.toLowerCase()}`);
   };
 
@@ -1485,7 +1647,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const sendNotification = (title: string, description: string, type: string) => {
     try {
       const notifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
-      notifs.unshift({ id: `n-${Date.now()}`, title, description, time: new Date().toISOString(), category: type, unread: true });
+      notifs.unshift({ id: `n-${Date.now()}`, user_id: user.id, title, description, time: new Date().toISOString(), category: type, unread: true });
       localStorage.setItem("coinloot_notifications", JSON.stringify(notifs));
       addLog("NOTIFICATION_SENT", "notification", "", `Sent: ${title}`);
       showNotif("success", "Notification sent");
@@ -1896,7 +2058,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       const allAccs = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
                       allAccs.forEach((a: any) => {
                         const userNotifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
-                        userNotifs.unshift({ id: `${notifId}-${a.profile.id}`, title: globalNotifText ? "📢 Announcement" : "🎉 Promo Event", description: globalNotifText || `Use code ${globalNotifPromoCode} to earn ${globalNotifPromoCoins} coins!`, time: new Date().toISOString(), category: "system", unread: true, coinsEarned: 0 });
+                        userNotifs.unshift({ id: `${notifId}-${a.profile.id}`, user_id: a.profile.id, title: globalNotifText ? "📢 Announcement" : "🎉 Promo Event", description: globalNotifText || `Use code ${globalNotifPromoCode} to earn ${globalNotifPromoCoins} coins!`, time: new Date().toISOString(), category: "system", unread: true, coinsEarned: 0 });
                         localStorage.setItem("coinloot_notifications", JSON.stringify(userNotifs));
                       });
                     } catch {}
@@ -1993,7 +2155,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                     <th className="text-left p-3 font-medium hidden lg:table-cell">Country</th>
                     <th className="text-right p-3 font-medium">Coins</th>
                     <th className="text-right p-3 font-medium hidden sm:table-cell">USD</th>
-                    <th className="text-right p-3 font-medium hidden lg:table-cell">Level</th>
+                    <th className="text-right p-3 font-medium hidden lg:table-cell">Level / Progress</th>
                     <th className="text-right p-3 font-medium hidden xl:table-cell">Earned</th>
                     <th className="text-center p-3 font-medium">Status</th>
                     <th className="text-right p-3 font-medium">Actions</th>
@@ -2013,7 +2175,15 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       <td className="p-3 text-slate-400 text-[10px] hidden lg:table-cell">{p.country || "—"}</td>
                       <td className="p-3 text-right font-mono text-white font-bold">{p.balance_coins.toLocaleString()}</td>
                       <td className="p-3 text-right font-mono text-emerald-400 hidden sm:table-cell">${p.balance_usd.toFixed(2)}</td>
-                      <td className="p-3 text-right font-mono text-slate-300 hidden lg:table-cell">{p.level}</td>
+                      <td className="p-3 text-right hidden lg:table-cell">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="font-mono text-xs font-bold text-purple-300">LVL {p.level}</span>
+                          <div className="w-20 h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-purple-500 to-cyan-400 rounded-full" style={{ width: `${Math.round(levelProgress(p.total_earned_coins).progress * 100)}%` }} />
+                          </div>
+                          <span className="text-[8px] font-mono text-slate-500">{getLevelTitle(p.level)}</span>
+                        </div>
+                      </td>
                       <td className="p-3 text-right font-mono text-slate-300 hidden xl:table-cell">{p.total_earned_coins.toLocaleString()}</td>
                       <td className="p-3 text-center">
                         {p.status === "banned" || p.is_banned ? (
@@ -2051,7 +2221,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                               ) : (
                                 <button onClick={() => { const r = prompt("Ban reason:"); if (r) handleBanUser(p.id, r); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20" title="Ban"><UserX className="w-3 h-3" /></button>
                               )}
-                              <button onClick={() => { if (confirm(`Delete ${p.username}?`)) handleDeleteUser(p.id); }} className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20" title="Delete"><Trash2 className="w-3 h-3" /></button>
+                              <button onClick={() => setDeleteModal({ userId: p.id, username: p.username, email: p.email || "", balance: `${p.balance_coins?.toLocaleString() || 0} coins / $${p.balance_usd?.toFixed(2) || "0.00"}` })} className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20" title="Delete Permanently"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
                         </div>
@@ -2344,13 +2514,13 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
-    // ═══ OFFERS ═══
-    if (section === "offers") {
-const handleSaveOffers = (updated: typeof offers) => {
-  setOffers(updated);
-  localStorage.setItem("coinloot_offers", JSON.stringify(updated));
-  AdminDb.saveOffers(updated).catch(() => {});
-};
+    // ═══ OFFER MANAGEMENT (combined) ═══
+    if (section === "offer-management") {
+      const handleSaveOffers = (updated: typeof offers) => {
+        setOffers(updated);
+        localStorage.setItem("coinloot_offers", JSON.stringify(updated));
+        AdminDb.saveOffers(updated).catch(() => {});
+      };
       const toggleOfferStatus = (id: string) => {
         const o = offers.find((x) => x.id === id);
         if (!o) return;
@@ -2396,57 +2566,56 @@ const handleSaveOffers = (updated: typeof offers) => {
         addLog("OFFER_CREATED", "offer", id, `Created offer ${newOffer.title}`);
       };
       return (
-        <div className="p-4 lg:p-6 space-y-4">
+        <div className="p-4 lg:p-6 space-y-6">
           <AdminBackBtn onClick={goBack} />
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h1 className="text-xl lg:text-2xl font-bold text-white">Offers Management</h1>
-            <button onClick={() => setShowAddOffer(!showAddOffer)} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer">
-              <Plus className="w-3.5 h-3.5" /> {showAddOffer ? "Cancel" : "Add Offer"}
-            </button>
-          </div>
+          <h1 className="text-xl lg:text-2xl font-bold text-white">Offer Management</h1>
 
-          {/* Add Offer Form */}
-          {showAddOffer && (
-            <div className="bg-slate-950/40 p-5 rounded-3xl border border-cyan-500/20 space-y-3">
-              <h3 className="text-xs font-bold text-cyan-400">New Offer</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <input value={newOffer.title} onChange={(e) => setNewOffer({ ...newOffer, title: e.target.value })} placeholder="Offer title" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
-                <select value={newOffer.provider} onChange={(e) => setNewOffer({ ...newOffer, provider: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
-                  {offerwallProviders.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                </select>
-                <input type="number" value={newOffer.payout || ""} onChange={(e) => setNewOffer({ ...newOffer, payout: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Payout coins" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
-                <select value={newOffer.difficulty} onChange={(e) => setNewOffer({ ...newOffer, difficulty: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
-                  <option value="Easy">Easy</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Hard">Hard</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <input value={newOffer.estimated_time} onChange={(e) => setNewOffer({ ...newOffer, estimated_time: e.target.value })} placeholder="Est. time (e.g. 15 min)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
-                <input type="number" value={newOffer.countries} onChange={(e) => setNewOffer({ ...newOffer, countries: parseInt(e.target.value) || 0 })} placeholder="Countries" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
-                <input type="number" value={newOffer.max_reward || ""} onChange={(e) => setNewOffer({ ...newOffer, max_reward: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
-                <input value={newOffer.tracking_link} onChange={(e) => setNewOffer({ ...newOffer, tracking_link: e.target.value })} placeholder="Tracking link (URL)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
-              </div>
-              <div>
-                <textarea value={newOffer.description_full} onChange={(e) => setNewOffer({ ...newOffer, description_full: e.target.value })} placeholder="Full description (optional)" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none" rows={2} />
-              </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
-                  <input type="checkbox" checked={newOffer.is_mobile_only} onChange={(e) => setNewOffer({ ...newOffer, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
-                  Mobile only
-                </label>
-                <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
-                  <input type="checkbox" checked={newOffer.is_pinned} onChange={(e) => setNewOffer({ ...newOffer, is_pinned: e.target.checked })} className="accent-cyan-500" />
-                  Pinned
-                </label>
-              </div>
-              <button onClick={handleAddOffer} className="px-4 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer">
-                <Plus className="w-3 h-3 inline mr-1" /> Create Offer
+          {/* ── Individual Offers ── */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-5 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-white">Offers</h2>
+              <button onClick={() => setShowAddOffer(!showAddOffer)} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer">
+                <Plus className="w-3.5 h-3.5" /> {showAddOffer ? "Cancel" : "Add Offer"}
               </button>
             </div>
-          )}
 
-          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            {showAddOffer && (
+              <div className="p-5 border-b border-white/5 bg-slate-950/40">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                  <input value={newOffer.title} onChange={(e) => setNewOffer({ ...newOffer, title: e.target.value })} placeholder="Offer title" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  <select value={newOffer.provider} onChange={(e) => setNewOffer({ ...newOffer, provider: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                    {offerwallProviders.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                  <input type="number" value={newOffer.payout || ""} onChange={(e) => setNewOffer({ ...newOffer, payout: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Payout coins" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
+                  <select value={newOffer.difficulty} onChange={(e) => setNewOffer({ ...newOffer, difficulty: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                  <input value={newOffer.estimated_time} onChange={(e) => setNewOffer({ ...newOffer, estimated_time: e.target.value })} placeholder="Est. time (e.g. 15 min)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  <input type="number" value={newOffer.countries} onChange={(e) => setNewOffer({ ...newOffer, countries: parseInt(e.target.value) || 0 })} placeholder="Countries" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  <input type="number" value={newOffer.max_reward || ""} onChange={(e) => setNewOffer({ ...newOffer, max_reward: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  <input value={newOffer.tracking_link} onChange={(e) => setNewOffer({ ...newOffer, tracking_link: e.target.value })} placeholder="Tracking link (URL)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                </div>
+                <textarea value={newOffer.description_full} onChange={(e) => setNewOffer({ ...newOffer, description_full: e.target.value })} placeholder="Full description (optional)" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none mb-3" rows={2} />
+                <div className="flex items-center gap-4 mb-3">
+                  <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                    <input type="checkbox" checked={newOffer.is_mobile_only} onChange={(e) => setNewOffer({ ...newOffer, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
+                    Mobile only
+                  </label>
+                  <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                    <input type="checkbox" checked={newOffer.is_pinned} onChange={(e) => setNewOffer({ ...newOffer, is_pinned: e.target.checked })} className="accent-cyan-500" />
+                    Pinned
+                  </label>
+                </div>
+                <button onClick={handleAddOffer} className="px-4 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer">
+                  <Plus className="w-3 h-3 inline mr-1" /> Create Offer
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-[11px]">
                 <thead><tr className="border-b border-white/5 text-slate-400 font-mono"><th className="text-left p-3 font-medium">Title</th><th className="text-left p-3 font-medium hidden sm:table-cell">Provider</th><th className="text-right p-3 font-medium">Payout</th><th className="text-left p-3 font-medium hidden md:table-cell">Difficulty</th><th className="text-center p-3 font-medium">Status</th><th className="text-right p-3 font-medium">Actions</th></tr></thead>
@@ -2476,10 +2645,7 @@ const handleSaveOffers = (updated: typeof offers) => {
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => startEditOffer(o.id)} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit Title"><Edit className="w-3 h-3" /></button>
-                            <button onClick={() => {
-                              setEditingOfferExt(editingOfferExt === o.id ? null : o.id);
-                              setEditOfferFull({ ...o });
-                            }} className={`p-1.5 rounded-lg transition-all cursor-pointer border ${editingOfferExt === o.id ? "bg-purple-500/20 text-purple-400 border-purple-500/30" : "bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/20"}`} title="Extended Edit"><Settings className="w-3 h-3" /></button>
+                            <button onClick={() => { setEditingOfferExt(editingOfferExt === o.id ? null : o.id); setEditOfferFull({ ...o }); }} className={`p-1.5 rounded-lg transition-all cursor-pointer border ${editingOfferExt === o.id ? "bg-purple-500/20 text-purple-400 border-purple-500/30" : "bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/20"}`} title="Extended Edit"><Settings className="w-3 h-3" /></button>
                             <button onClick={() => toggleOfferStatus(o.id)} className={`p-1.5 rounded-lg transition-all cursor-pointer ${o.status === "active" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"}`} title={o.status === "active" ? "Lock" : o.status === "inactive" ? "Unlock" : "Activate"}>
                               {o.status === "active" ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                             </button>
@@ -2493,14 +2659,7 @@ const handleSaveOffers = (updated: typeof offers) => {
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">
                                 <h4 className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Extended Edit: {o.title}</h4>
-                                <button onClick={() => {
-                                  handleSaveOffers(offers.map((x) => x.id === o.id ? { ...editOfferFull } : x));
-                                  setEditingOfferExt(null);
-                                  showNotif("success", "Offer details updated");
-                                  addLog("OFFER_UPDATED", "offer", o.id, "Updated extended fields");
-                                }} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" /> Save
-                                </button>
+                                <button onClick={() => { handleSaveOffers(offers.map((x) => x.id === o.id ? { ...editOfferFull } : x)); setEditingOfferExt(null); showNotif("success", "Offer details updated"); addLog("OFFER_UPDATED", "offer", o.id, "Updated extended fields"); }} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Save</button>
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                 <input value={editOfferFull.estimated_time || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, estimated_time: e.target.value })} placeholder="Est. time" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
@@ -2508,9 +2667,7 @@ const handleSaveOffers = (updated: typeof offers) => {
                                 <input type="number" value={editOfferFull.max_reward || 0} onChange={(e) => setEditOfferFull({ ...editOfferFull, max_reward: parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
                                 <input value={editOfferFull.tracking_link || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, tracking_link: e.target.value })} placeholder="Tracking link" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
                               </div>
-                              <div>
-                                <textarea value={editOfferFull.description_full || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, description_full: e.target.value })} placeholder="Full description" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600 resize-none" rows={2} />
-                              </div>
+                              <textarea value={editOfferFull.description_full || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, description_full: e.target.value })} placeholder="Full description" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600 resize-none" rows={2} />
                               <div className="flex items-center gap-4">
                                 <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
                                   <input type="checkbox" checked={editOfferFull.is_mobile_only || false} onChange={(e) => setEditOfferFull({ ...editOfferFull, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
@@ -2532,36 +2689,11 @@ const handleSaveOffers = (updated: typeof offers) => {
             </div>
             {offers.length === 0 && <div className="p-8 text-center text-xs text-slate-500">No offers yet</div>}
           </div>
-        </div>
-      );
-    }
 
-    // ═══ LOCKED OFFERS ═══
-    if (section === "locked-offers" || section === "locked-offers-rules") {
-      const saveRules = (updated: typeof rules) => {
-        setRules(updated);
-        localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated));
-        AdminDb.saveLockRules(updated).catch(() => {});
-      };
-      const addRule = () => {
-        if (!newRule.name) return showNotif("error", "Rule name required");
-        saveRules([...rules, { ...newRule, id: `rule-${Date.now()}` }]);
-        setNewRule({ name: "", type: "coins_earned", value: 1000 });
-        showNotif("success", "Lock rule created");
-        addLog("RULE_CREATED", "rule", "", `Created rule: ${newRule.name}`);
-      };
-      const deleteRule = (id: string) => {
-        saveRules(rules.filter((r) => r.id !== id));
-        showNotif("success", "Rule deleted");
-        addLog("RULE_DELETED", "rule", id, "Deleted lock rule");
-      };
-      return (
-        <div className="p-4 lg:p-6 space-y-4">
-          <AdminBackBtn onClick={goBack} />
-          <h1 className="text-xl lg:text-2xl font-bold text-white">Locked Offer Rules</h1>
+          {/* ── Lock Rules ── */}
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
-            <h3 className="text-sm font-bold text-white mb-4">Create Unlock Rule</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <h2 className="text-sm font-bold text-white mb-4">Unlock Rules</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
               <input value={newRule.name} onChange={(e) => setNewRule({ ...newRule, name: e.target.value })} placeholder="Rule name..." className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20" />
               <select value={newRule.type} onChange={(e) => setNewRule({ ...newRule, type: e.target.value })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20">
                 <option value="coins_earned">Min Coins Earned</option>
@@ -2569,31 +2701,32 @@ const handleSaveOffers = (updated: typeof offers) => {
                 <option value="tasks_completed">Min Tasks</option>
               </select>
               <input type="number" value={newRule.value || ""} onChange={(e) => setNewRule({ ...newRule, value: e.target.value === "" ? 0 : parseInt(e.target.value) || 0 })} className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/20" />
-              <button onClick={addRule} className="py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer"><Plus className="w-3 h-3 inline mr-1" /> Add Rule</button>
+              <button onClick={() => { if (!newRule.name) { showNotif("error", "Rule name required"); return; } const saveRules = (updated: typeof rules) => { setRules(updated); localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated)); AdminDb.saveLockRules(updated).catch(() => {}); }; saveRules([...rules, { ...newRule, id: `rule-${Date.now()}` }]); setNewRule({ name: "", type: "coins_earned", value: 1000 }); showNotif("success", "Lock rule created"); addLog("RULE_CREATED", "rule", "", `Created rule: ${newRule.name}`); }} className="py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer"><Plus className="w-3 h-3 inline mr-1" /> Add Rule</button>
+            </div>
+            <div className="space-y-2">
+              {rules.map((r) => (
+                <div key={r.id} className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="block text-xs font-semibold text-white">{r.name}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{r.type.replace("_", " ")} ≥ {r.value}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { const saveRules = (updated: typeof rules) => { setRules(updated); localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated)); AdminDb.saveLockRules(updated).catch(() => {}); }; setNewRule({ name: r.name, type: r.type, value: r.value }); saveRules(rules.filter((x) => x.id !== r.id)); }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit"><Edit className="w-3 h-3" /></button>
+                    <button onClick={() => { const saveRules = (updated: typeof rules) => { setRules(updated); localStorage.setItem("coinloot_lock_rules", JSON.stringify(updated)); AdminDb.saveLockRules(updated).catch(() => {}); }; saveRules(rules.filter((x) => x.id !== r.id)); showNotif("success", "Rule deleted"); addLog("RULE_DELETED", "rule", r.id, "Deleted lock rule"); }} className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                </div>
+              ))}
+              {rules.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No lock rules configured</p>}
             </div>
           </div>
-          <div className="space-y-2">
-            {rules.map((r) => (
-              <div key={r.id} className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <span className="block text-xs font-semibold text-white">{r.name}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{r.type.replace("_", " ")} ≥ {r.value}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => { setNewRule({ name: r.name, type: r.type, value: r.value }); deleteRule(r.id); }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit"><Edit className="w-3 h-3" /></button>
-                  <button onClick={() => deleteRule(r.id)} className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-            ))}
-            {rules.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No lock rules configured</p>}
-          </div>
+
+          {/* ── Locked Offerwall Management ── */}
+          <AdminLockedOfferwalls section="locked-offers-management" onBack={goBack} showNotif={showNotif} />
+
+          {/* ── Promo Codes ── */}
+          <AdminLockedOfferwalls section="locked-offers-promos" onBack={goBack} showNotif={showNotif} />
         </div>
       );
-    }
-
-    // ═══ LOCKED OFFERWALL MANAGEMENT ═══
-    if (section === "locked-offers-management" || section === "locked-offers-promos") {
-      return <AdminLockedOfferwalls section={section} onBack={goBack} showNotif={showNotif} />;
     }
 
     // ═══ COINS & REWARDS ═══
@@ -2604,6 +2737,7 @@ const handleSaveOffers = (updated: typeof offers) => {
           a.profile.balance_coins += coinAmount;
           a.profile.total_earned_coins += coinAmount;
           a.profile.balance_usd = a.profile.balance_coins / 1000;
+          a.profile.level = calcLevel(a.profile.balance_coins);
           addUserNotification(a.profile.id, `${coinAmount.toLocaleString()} Coins Bonus!`, `You received a bonus of ${coinAmount.toLocaleString()} coins from the admin.`, "credit", coinAmount);
         });
         saveAccounts(accs);
@@ -2777,8 +2911,18 @@ const handleSaveOffers = (updated: typeof offers) => {
       );
     }
 
-    // ═══ NOTIFICATIONS ═══
-    if (section === "notifications" || section === "notifications-send") {
+    // ═══ NOTIFICATION CENTER ═══
+    if (section === "notification-center" || section === "notifications") {
+      return <AdminNotificationCenter showNotif={showNotif} />;
+    }
+
+    // ═══ NOTIFICATION PREFERENCES ═══
+    if (section === "notification-prefs") {
+      return <AdminNotificationPrefs showNotif={showNotif} />;
+    }
+
+    // ═══ SEND NOTIFICATIONS ═══
+    if (section === "notifications-send") {
       const handleSendNotif = () => {
         if (!notifTitle || !notifDesc) return showNotif("error", "Title and description required");
         sendNotification(notifTitle, notifDesc, notifType);
@@ -2790,7 +2934,7 @@ const handleSaveOffers = (updated: typeof offers) => {
         const accs = getAccounts();
         accs.forEach((a) => {
           const notifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
-          notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, title: notifTitle, description: notifDesc, time: new Date().toISOString(), category: notifType, unread: true });
+          notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, user_id: a.profile.id, title: notifTitle, description: notifDesc, time: new Date().toISOString(), category: notifType, unread: true });
           localStorage.setItem("coinloot_notifications", JSON.stringify(notifs));
         });
         addLog("BROADCAST_SENT", "notification", "all", `Broadcast: ${notifTitle}`);
@@ -3142,62 +3286,136 @@ const handleSaveOffers = (updated: typeof offers) => {
 
     // ═══ KYC MANAGEMENT ═══
     if (section === "kyc") {
-      const kycUsers = profiles.filter(p => p.kyc_status === "PENDING" || p.kyc_status === "APPROVED" || p.kyc_status === "REJECTED");
-      const pendingKyc = profiles.filter(p => p.kyc_status === "PENDING");
-      const approvedKyc = profiles.filter(p => p.kyc_status === "APPROVED");
-      const rejectedKyc = profiles.filter(p => p.kyc_status === "REJECTED");
-
-      const handleKycAction = async (userId: string, action: "APPROVED" | "REJECTED") => {
-        const sb = getSupabaseClient();
-        if (sb) {
-          try {
-            await sb.from("kyc_records").update({ status: action }).eq("user_id", userId);
-            await sb.from("profiles").update({ kyc_status: action }).eq("id", userId);
-            setProfilesRefreshKey(k => k + 1);
-            showNotif("success", `KYC ${action} for user`);
-            return;
-          } catch {}
-        }
-        const stored = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-        const idx = stored.findIndex((a: any) => a.profile?.id === userId);
-        if (idx >= 0) {
-          stored[idx].profile.kyc_status = action;
-          localStorage.setItem("coinloot_accounts", JSON.stringify(stored));
-        }
-        const profilesRaw = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
-        const pIdx = profilesRaw.findIndex((p: any) => p.id === userId);
-        if (pIdx >= 0) {
-          profilesRaw[pIdx].kyc_status = action;
-          localStorage.setItem("coinloot_user_profiles", JSON.stringify(profilesRaw));
-        }
-        setProfilesRefreshKey(k => k + 1);
-        showNotif("success", `KYC ${action} for user`);
+      // Merge server records (with images) + localStorage records (metadata-only fallback)
+      const localRecords = getAllKycRecords();
+      const kycRecords = serverRecords !== null
+        ? (() => {
+            const seen = new Set(serverRecords.map(r => r.userId));
+            return [...serverRecords, ...localRecords.filter(r => !seen.has(r.userId))];
+          })()
+        : localRecords;
+      const kycStats = {
+        total: kycRecords.length,
+        pending: kycRecords.filter(r => r.status === "PENDING").length,
+        approved: kycRecords.filter(r => r.status === "APPROVED").length,
+        rejected: kycRecords.filter(r => r.status === "REJECTED").length,
       };
 
       const viewKycDoc = (userId: string) => {
-        const data = localStorage.getItem(`coinloot_kyc_${userId}`);
-        if (data) {
-          const parsed = JSON.parse(data);
-          setViewingKyc(parsed);
-        } else {
-          showNotif("error", "No KYC documents found for this user");
+        // First try the server records (they have images)
+        const serverRec = serverRecords?.find(r => r.userId === userId);
+        if (serverRec) {
+          setViewingKyc(serverRec);
+          return;
         }
+        // Fallback to localStorage
+        const record = getKycRecord(userId);
+        if (record) {
+          setViewingKyc(record);
+          return;
+        }
+        // Try fetching from server directly
+        fetch(`/api/kyc/request/${userId}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.record) setViewingKyc(d.record);
+            else showNotif("error", "No KYC documents found for this user");
+          })
+          .catch(() => showNotif("error", "No KYC documents found for this user"));
+      };
+
+      const handleOpenApprove = (userId: string, username: string, email: string) => {
+        setKycActionModal({ userId, username, email, action: "APPROVED" });
+        setRejectReason("");
+        setRejectAndRestrict(false);
+      };
+
+      const handleOpenReject = (userId: string, username: string, email: string) => {
+        setKycActionModal({ userId, username, email, action: "REJECTED" });
+        setRejectReason("");
+        setRejectAndRestrict(false);
+      };
+
+      const handleConfirmAction = () => {
+        if (!kycActionModal) return;
+        const { userId, username, email, action } = kycActionModal;
+
+        if (action === "APPROVED") {
+          try {
+            approveKycByUserId(userId, user?.username || "Admin");
+            // Optimistic UI update: immediately reflect status in serverRecords
+            setServerRecords(prev => prev ? prev.map(r =>
+              r.userId === userId
+                ? { ...r, status: "APPROVED", adminName: user?.username || "Admin", reviewedAt: new Date().toISOString() }
+                : r
+            ) : prev);
+            addLog("KYC_APPROVED", "kyc", userId, `Approved KYC for ${username}`);
+            addUserNotification(userId, "✅ KYC Approved", "Your identity verification has been approved. You may now submit withdrawal requests.", "system");
+            showNotif("success", `KYC approved for ${username}`);
+            createAdminNotification && createAdminNotification("verification_request", "✅ KYC Approved", `KYC approved for ${username}\nEmail: ${email}\nID: ${userId}`, userId, username, { related_id: userId });
+          } catch (e) {
+            showNotif("error", `KYC approval failed: ${(e as Error).message}`);
+            return;
+          }
+        } else if (action === "REJECTED") {
+          try {
+            rejectKycByUserId(userId, user?.username || "Admin", rejectReason || "Documents did not meet verification requirements");
+            // Optimistic UI update: immediately reflect status in serverRecords
+            setServerRecords(prev => prev ? prev.map(r =>
+              r.userId === userId
+                ? { ...r, status: "REJECTED", adminName: user?.username || "Admin", reviewedAt: new Date().toISOString() }
+                : r
+            ) : prev);
+            addLog("KYC_REJECTED", "kyc", userId, `Rejected KYC for ${username}: ${rejectReason || "No reason"}`);
+
+            if (rejectAndRestrict) {
+              restrictUser(userId, 999999, "KYC Verification Failed", user?.username || "Admin", rejectReason || "KYC rejection");
+              addLog("USER_RESTRICTED", "user", userId, `Restricted ${username} for failed KYC`);
+              addUserNotification(userId, "🚫 Account Restricted", "Reason: KYC Verification Failed. You cannot complete offers, earn rewards, or withdraw.", "system");
+            } else {
+              addUserNotification(userId, "❌ KYC Rejected", `Reason: ${rejectReason || "Documents did not meet requirements"}`, "system");
+            }
+            showNotif("success", `KYC rejected${rejectAndRestrict ? " and account restricted" : ""} for ${username}`);
+            createAdminNotification && createAdminNotification("verification_request", "❌ KYC Rejected", `KYC rejected for ${username}\nReason: ${rejectReason || "Documents did not meet requirements"}${rejectAndRestrict ? "\nAccount Restricted" : ""}`, userId, username, { related_id: userId, priority: "high" as NotificationPriority });
+          } catch (e) {
+            showNotif("error", `KYC rejection failed: ${(e as Error).message}`);
+            return;
+          }
+        }
+        setKycActionModal(null);
+        setProfilesRefreshKey(k => k + 1);
+        loadServerRecords();
+      };
+
+      const handleDownload = (dataUrl: string, filename: string) => {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = filename;
+        a.click();
       };
 
       return (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-bold text-white">KYC Verification</h2>
-            <p className="text-xs text-slate-400 mt-1">Manage user identity verification requests.</p>
+        <div className="p-4 lg:p-6 space-y-4">
+          <AdminBackBtn onClick={goBack} />
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-cyan-400" /> KYC Verification
+              </h1>
+              <p className="text-[10px] text-slate-500 font-mono mt-1">Review and manage identity verification requests.</p>
+            </div>
+            <button onClick={loadServerRecords} disabled={loadingRecords} className="px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50">
+              <RefreshCw className={`w-3 h-3 ${loadingRecords ? "animate-spin" : ""}`} /> Refresh
+            </button>
           </div>
 
           {/* Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: "Total", value: kycUsers.length, color: "text-white" },
-              { label: "Pending", value: pendingKyc.length, color: "text-amber-400" },
-              { label: "Approved", value: approvedKyc.length, color: "text-emerald-400" },
-              { label: "Rejected", value: rejectedKyc.length, color: "text-rose-400" },
+              { label: "Total", value: kycStats.total, color: "text-white" },
+              { label: "Pending", value: kycStats.pending, color: "text-amber-400" },
+              { label: "Approved", value: kycStats.approved, color: "text-emerald-400" },
+              { label: "Rejected", value: kycStats.rejected, color: "text-rose-400" },
             ].map((s, i) => (
               <div key={i} className="bg-slate-950/40 p-4 rounded-2xl border border-white/5">
                 <span className={`block text-2xl font-bold font-mono ${s.color}`}>{s.value}</span>
@@ -3206,127 +3424,296 @@ const handleSaveOffers = (updated: typeof offers) => {
             ))}
           </div>
 
-          {/* Pending Requests */}
+          {/* All KYC Records Table */}
           <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4" /> Pending Verification
-              </h3>
-              <span className="px-2 py-0.5 text-[9px] rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">{pendingKyc.length} pending</span>
-            </div>
-            {pendingKyc.length === 0 ? (
-              <div className="p-8 text-center">
-                <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                <p className="text-xs text-slate-500">No pending KYC requests</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-white/5">
-                {pendingKyc.map((u) => (
-                  <div key={u.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
-                        {u.username[0].toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <span className="block text-sm font-semibold text-white truncate">{u.username}</span>
-                        <span className="block text-[9px] text-slate-500 font-mono truncate">{u.email} — {u.country || "N/A"}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={() => viewKycDoc(u.id)} className="px-3 py-1.5 rounded-xl bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">View Docs</button>
-                      <button onClick={() => handleKycAction(u.id, "APPROVED")} className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-[9px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Approve</button>
-                      <button onClick={() => handleKycAction(u.id, "REJECTED")} className="px-3 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-[9px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer flex items-center gap-1"><XCircle className="w-3 h-3" /> Reject</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* All KYC Users */}
-          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
-            <div className="p-4 border-b border-white/5">
               <h3 className="text-sm font-bold text-white">All KYC Records</h3>
+              <span className="text-[9px] text-slate-500 font-mono">{kycStats.total} total</span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-[10px]">
                 <thead>
                   <tr className="border-b border-white/5 text-[9px] text-slate-500 font-mono uppercase">
-                    <th className="text-left p-3 font-medium">User</th>
+                    <th className="text-left p-3 font-medium">User ID</th>
+                    <th className="text-left p-3 font-medium">Username</th>
                     <th className="text-left p-3 font-medium">Email</th>
+                    <th className="text-left p-3 font-medium">Country</th>
+                    <th className="text-left p-3 font-medium">Document Type</th>
+                    <th className="text-left p-3 font-medium">Submitted Date</th>
                     <th className="text-left p-3 font-medium">Status</th>
                     <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {kycUsers.map((u) => (
-                    <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  {kycRecords.map((rec) => (
+                    <tr key={rec.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                      <td className="p-3 font-mono text-[8px] text-cyan-400">#{rec.userId.slice(0, 8)}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center text-[8px] font-bold text-white">{u.username[0].toUpperCase()}</div>
-                          <span className="font-semibold text-white">{u.username}</span>
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center text-[8px] font-bold text-white">{rec.username[0].toUpperCase()}</div>
+                          <span className="font-semibold text-white text-[10px]">{rec.username}</span>
                         </div>
                       </td>
-                      <td className="p-3 text-slate-400">{u.email}</td>
+                      <td className="p-3 text-[9px] text-slate-400 font-mono">{rec.email}</td>
+                      <td className="p-3 text-[9px] text-slate-500 font-mono">{rec.country || "—"}</td>
+                      <td className="p-3 font-mono text-[9px] text-slate-400 uppercase">{rec.docType.replace("_", " ")}</td>
+                      <td className="p-3 text-[9px] text-slate-500 font-mono whitespace-nowrap">{new Date(rec.submittedAt).toLocaleDateString()}</td>
                       <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
-                          u.kyc_status === "APPROVED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                          u.kyc_status === "REJECTED" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" :
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-mono font-bold ${
+                          rec.status === "APPROVED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                          rec.status === "REJECTED" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" :
                           "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                        }`}>{u.kyc_status}</span>
+                        }`}>{rec.status}</span>
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => viewKycDoc(u.id)} className="px-2 py-1 rounded-lg bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">Docs</button>
-                          {u.kyc_status === "PENDING" && (
+                          <button onClick={() => viewKycDoc(rec.userId)} className="px-2 py-1 rounded-lg bg-slate-800 border border-white/10 text-[8px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">View</button>
+                          {rec.status === "PENDING" && (
                             <>
-                              <button onClick={() => handleKycAction(u.id, "APPROVED")} className="px-2 py-1 rounded-lg bg-emerald-500/15 text-[9px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer">Approve</button>
-                              <button onClick={() => handleKycAction(u.id, "REJECTED")} className="px-2 py-1 rounded-lg bg-rose-500/15 text-[9px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer">Reject</button>
+                              <button onClick={() => handleOpenApprove(rec.userId, rec.username, rec.email)} className="px-2 py-1 rounded-lg bg-emerald-500/15 text-[8px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer">Approve</button>
+                              <button onClick={() => handleOpenReject(rec.userId, rec.username, rec.email)} className="px-2 py-1 rounded-lg bg-rose-500/15 text-[8px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer">Reject</button>
                             </>
                           )}
                         </div>
                       </td>
                     </tr>
                   ))}
+                  {kycRecords.length === 0 && (
+                    <tr><td colSpan={8} className="text-center py-8 text-xs text-slate-500">No KYC records yet</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
 
+          {/* Pending Requests */}
+          {kycStats.pending > 0 && (
+            <div className="bg-slate-950/40 rounded-3xl border border-amber-500/10 overflow-hidden">
+              <div className="p-4 border-b border-white/5 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                  <Clock className="w-4 h-4" /> Pending Verification
+                </h3>
+                <span className="px-2 py-0.5 text-[9px] rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">{kycStats.pending} pending</span>
+              </div>
+              <div className="divide-y divide-white/5">
+                {kycRecords.filter(r => r.status === "PENDING").map((rec) => (
+                  <div key={rec.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                        {rec.username[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="block text-sm font-semibold text-white truncate">{rec.username}</span>
+                        <span className="block text-[9px] text-slate-500 font-mono truncate">{rec.email} — {rec.country || "N/A"}</span>
+                        <span className="block text-[8px] text-slate-600 font-mono mt-0.5">{rec.docType.replace("_", " ").toUpperCase()} · Submitted {new Date(rec.submittedAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => viewKycDoc(rec.userId)} className="px-3 py-1.5 rounded-xl bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer">View Docs</button>
+                      <button onClick={() => handleOpenApprove(rec.userId, rec.username, rec.email)} className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-[9px] text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Approve</button>
+                      <button onClick={() => handleOpenReject(rec.userId, rec.username, rec.email)} className="px-3 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-[9px] text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer flex items-center gap-1"><XCircle className="w-3 h-3" /> Reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* KYC Action Modal */}
+          {kycActionModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => setKycActionModal(null)}>
+              <div className="max-w-sm w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => setKycActionModal(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+
+                {kycActionModal.action === "APPROVED" ? (
+                  <>
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-6 h-6 text-emerald-400" />
+                    </div>
+                    <h3 className="text-base font-bold text-white text-center mb-1">Approve KYC</h3>
+                    <p className="text-[10px] text-slate-400 font-mono text-center mb-4">
+                      Approve identity verification for <span className="text-emerald-400 font-bold">{kycActionModal.username}</span>
+                    </p>
+                    <div className="bg-slate-900/60 rounded-2xl p-3 mb-5 border border-white/5 space-y-1.5">
+                      <div className="flex justify-between text-[9px]"><span className="text-slate-500">Email</span><span className="text-white font-mono">{kycActionModal.email}</span></div>
+                      <div className="flex justify-between text-[9px]"><span className="text-slate-500">User ID</span><span className="text-cyan-400 font-mono">#{kycActionModal.userId.slice(0, 8)}</span></div>
+                    </div>
+                    <p className="text-[9px] text-slate-500 font-mono text-center mb-4">User will be notified and withdrawal access will be unlocked.</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => setKycActionModal(null)} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">Cancel</button>
+                      <button onClick={handleConfirmAction} className="flex-1 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold hover:bg-emerald-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5" /> Approve
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center mx-auto mb-4">
+                      <XCircle className="w-6 h-6 text-rose-400" />
+                    </div>
+                    <h3 className="text-base font-bold text-white text-center mb-1">Reject KYC</h3>
+                    <p className="text-[10px] text-slate-400 font-mono text-center mb-4">
+                      Reject verification for <span className="text-rose-400 font-bold">{kycActionModal.username}</span>
+                    </p>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1.5">Reason for Rejection <span className="text-rose-400">*</span></label>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="Explain why the verification was rejected..."
+                          rows={3}
+                          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none"
+                        />
+                        <p className="text-[8px] text-slate-600 font-mono mt-1">Required — the user will see this reason.</p>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-rose-500/5 border border-rose-500/10">
+                        <div>
+                          <span className="text-xs font-semibold text-white">Restrict Account</span>
+                          <p className="text-[8px] text-slate-500 mt-0.5">User cannot complete offers, withdraw, or earn rewards</p>
+                        </div>
+                        <button
+                          onClick={() => setRejectAndRestrict(!rejectAndRestrict)}
+                          className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${rejectAndRestrict ? "bg-rose-500" : "bg-slate-700"}`}
+                        >
+                          <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: rejectAndRestrict ? "calc(100% - 18px)" : "2px" }} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-5">
+                      <button onClick={() => setKycActionModal(null)} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">Cancel</button>
+                      <button
+                        onClick={handleConfirmAction}
+                        disabled={!rejectReason.trim()}
+                        className="flex-1 py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <XCircle className="w-3.5 h-3.5" /> Reject
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* KYC Document Viewer Modal */}
           {viewingKyc && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-              <div className="max-w-2xl w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="max-w-3xl w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-bold text-white">KYC Documents</h3>
-                  <button onClick={() => setViewingKyc(null)} className="text-slate-400 hover:text-white transition-all cursor-pointer"><X className="w-4 h-4" /></button>
+                  <div>
+                    <h3 className="text-base font-bold text-white">
+                      KYC Documents — {(viewingKyc as any).username || "Unknown User"}
+                    </h3>
+                    {(viewingKyc as any).docType && (
+                      <span className="text-[9px] text-slate-500 font-mono">{(viewingKyc as any).docType.replace("_", " ").toUpperCase()}</span>
+                    )}
+                    {(viewingKyc as any).status && (
+                      <span className={`ml-2 px-1.5 py-0.5 rounded text-[7px] font-mono font-bold ${
+                        (viewingKyc as any).status === "APPROVED" ? "bg-emerald-500/10 text-emerald-400" :
+                        (viewingKyc as any).status === "REJECTED" ? "bg-rose-500/10 text-rose-400" :
+                        "bg-amber-500/10 text-amber-400"
+                      }`}>{(viewingKyc as any).status}</span>
+                    )}
+                  </div>
+                  <button onClick={() => { setViewingKyc(null); setZoomImageKyc(null); }} className="text-slate-400 hover:text-white transition-all cursor-pointer"><X className="w-4 h-4" /></button>
                 </div>
+
+                {/* User Info Bar */}
+                <div className="mb-4 p-3 rounded-2xl bg-slate-900/60 border border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[9px] font-mono">
+                  <div>
+                    <span className="text-slate-500 block">Email</span>
+                    <span className="text-white">{(viewingKyc as any).email || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">User ID</span>
+                    <span className="text-cyan-400">#{(viewingKyc as any).userId?.slice(0, 8) || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">Country</span>
+                    <span className="text-white">{(viewingKyc as any).country || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">Submitted</span>
+                    <span className="text-white">{(viewingKyc as any).submittedAt ? new Date((viewingKyc as any).submittedAt).toLocaleDateString() : "—"}</span>
+                  </div>
+                </div>
+
+                {/* Document Images */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {viewingKyc.docFront && (
-                    <div>
-                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Front Side</span>
-                      <img src={viewingKyc.docFront} alt="Front" className="w-full rounded-2xl border border-white/10" />
+                  {(viewingKyc as any).docFront && (
+                    <div className="bg-slate-900/40 rounded-2xl p-3 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Front Side</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => setZoomImageKyc((viewingKyc as any).docFront)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Zoom"><ZoomIn className="w-3 h-3" /></button>
+                          <button onClick={() => handleDownload((viewingKyc as any).docFront, `kyc-front-${(viewingKyc as any).userId || "user"}.jpg`)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Download"><Download className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                      <img src={(viewingKyc as any).docFront} alt="Front" className="w-full rounded-xl border border-white/5 cursor-pointer hover:opacity-90 transition-all max-h-60 object-contain" onClick={() => setZoomImageKyc((viewingKyc as any).docFront)} />
                     </div>
                   )}
-                  {viewingKyc.docBack && (
-                    <div>
-                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Back Side</span>
-                      <img src={viewingKyc.docBack} alt="Back" className="w-full rounded-2xl border border-white/10" />
-                    </div>
-                  )}
-                  {viewingKyc.selfie && (
-                    <div className={viewingKyc.docBack ? "" : "sm:col-span-2"}>
-                      <span className="text-[9px] text-slate-500 font-mono uppercase block mb-2">Selfie</span>
-                      <img src={viewingKyc.selfie} alt="Selfie" className="w-full max-w-xs rounded-2xl border border-white/10" />
+                  {(viewingKyc as any).docBack && (
+                    <div className="bg-slate-900/40 rounded-2xl p-3 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Back Side</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => setZoomImageKyc((viewingKyc as any).docBack)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Zoom"><ZoomIn className="w-3 h-3" /></button>
+                          <button onClick={() => handleDownload((viewingKyc as any).docBack, `kyc-back-${(viewingKyc as any).userId || "user"}.jpg`)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Download"><Download className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                      <img src={(viewingKyc as any).docBack} alt="Back" className="w-full rounded-xl border border-white/5 cursor-pointer hover:opacity-90 transition-all max-h-60 object-contain" onClick={() => setZoomImageKyc((viewingKyc as any).docBack)} />
                     </div>
                   )}
                 </div>
-                {viewingKyc.docType && (
-                  <p className="text-[10px] text-slate-400 mt-4 font-mono">Document Type: {viewingKyc.docType}</p>
-                )}
-                {viewingKyc.submittedAt && (
-                  <p className="text-[9px] text-slate-500 mt-1 font-mono">Submitted: {new Date(viewingKyc.submittedAt).toLocaleString()}</p>
-                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                  {(viewingKyc as any).selfie && (
+                    <div className="bg-slate-900/40 rounded-2xl p-3 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[9px] text-slate-500 font-mono uppercase">Selfie</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => setZoomImageKyc((viewingKyc as any).selfie)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Zoom"><ZoomIn className="w-3 h-3" /></button>
+                          <button onClick={() => handleDownload((viewingKyc as any).selfie, `kyc-selfie-${(viewingKyc as any).userId || "user"}.jpg`)} className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer" title="Download"><Download className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                      <img src={(viewingKyc as any).selfie} alt="Selfie" className="w-full rounded-xl border border-white/5 cursor-pointer hover:opacity-90 transition-all max-h-60 object-contain" onClick={() => setZoomImageKyc((viewingKyc as any).selfie)} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Status & Notes */}
+                <div className="mt-4 p-3 rounded-2xl bg-slate-900/60 border border-white/5 space-y-1.5">
+                  <div className="flex flex-wrap gap-4 text-[9px] text-slate-500 font-mono">
+                    {(viewingKyc as any).submittedAt && (
+                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Submitted: {new Date((viewingKyc as any).submittedAt).toLocaleString()}</span>
+                    )}
+                    {(viewingKyc as any).reviewedAt && (
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Reviewed: {new Date((viewingKyc as any).reviewedAt).toLocaleString()}</span>
+                    )}
+                    {(viewingKyc as any).docType && (
+                      <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> Type: {(viewingKyc as any).docType.replace("_", " ").toUpperCase()}</span>
+                    )}
+                  </div>
+                  {(viewingKyc as any).adminNote && (
+                    <div className="mt-2 pt-2 border-t border-white/5">
+                      <span className="text-[9px] text-rose-400 font-mono flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Admin Note:</span>
+                      <p className="text-xs text-slate-300 mt-0.5">{(viewingKyc as any).adminNote}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Zoom Image Modal */}
+          {zoomImageKyc && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md" onClick={() => setZoomImageKyc(null)}>
+              <div className="max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-end mb-2">
+                  <button onClick={() => setZoomImageKyc(null)} className="p-2 rounded-xl bg-slate-900/80 border border-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"><X className="w-4 h-4" /></button>
+                </div>
+                <img src={zoomImageKyc} alt="Zoom" className="max-w-full max-h-[85vh] rounded-2xl border border-white/10 shadow-2xl" />
               </div>
             </div>
           )}
@@ -3335,7 +3722,7 @@ const handleSaveOffers = (updated: typeof offers) => {
     }
 
     // ═══ SECURITY ═══
-    if (section === "security" || section === "fraud" || section === "logs" || section === "vpn-control") {
+    if (section === "security" || section === "fraud" || section === "logs" || section === "vpn-control" || section === "vpn-api") {
       const logs = getLogs();
       const fraudUsers = profiles.filter((p) => p.vpn_detected);
       const restrictedUsers = getRestrictedUsers();
@@ -3370,7 +3757,7 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
 
             {/* ── VPN Protection Settings ── */}
-            {section !== "logs" && section !== "vpn-control" && (
+            {section !== "logs" && section !== "vpn-control" && section !== "vpn-api" && (
               <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
                 <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" /> VPN Protection</h3>
                 <div className="space-y-3">
@@ -3389,12 +3776,49 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                       </button>
                     </div>
                   ))}
+                  {/* Auto-Restrict Rules */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/40 border border-amber-500/10">
+                    <div>
+                      <span className="text-xs font-semibold text-white">Auto Restrict</span>
+                      <p className="text-[8px] text-slate-500 mt-0.5">Automatically restrict users after N VPN detections</p>
+                    </div>
+                    <button onClick={() => {
+                      const updated = { ...autoRestrictRules, enabled: !autoRestrictRules.enabled };
+                      setAutoRestrictRules(updated);
+                      saveAutoRestrictRules(updated);
+                      showNotif("success", `Auto restrict ${updated.enabled ? "enabled" : "disabled"}`);
+                    }} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${autoRestrictRules.enabled ? "bg-amber-500" : "bg-slate-700"}`}>
+                      <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: autoRestrictRules.enabled ? "calc(100% - 18px)" : "2px" }} />
+                    </button>
+                  </div>
+                  {autoRestrictRules.enabled && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-900/40 border border-white/5">
+                      <div className="flex-1">
+                        <span className="text-[9px] text-slate-400 font-mono block mb-1">Threshold (detections)</span>
+                        <input type="number" value={autoRestrictRules.threshold} onChange={(e) => {
+                          const v = parseInt(e.target.value) || 1;
+                          const updated = { ...autoRestrictRules, threshold: v };
+                          setAutoRestrictRules(updated);
+                          saveAutoRestrictRules(updated);
+                        }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white font-mono" min={1} />
+                      </div>
+                      <div className="flex-1">
+                        <span className="text-[9px] text-slate-400 font-mono block mb-1">Duration (min)</span>
+                        <input type="number" value={autoRestrictRules.durationMinutes} onChange={(e) => {
+                          const v = parseInt(e.target.value) || 1;
+                          const updated = { ...autoRestrictRules, durationMinutes: v };
+                          setAutoRestrictRules(updated);
+                          saveAutoRestrictRules(updated);
+                        }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white font-mono" min={1} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
             {/* ── IP Logs ── */}
-            {section !== "fraud" && section !== "vpn-control" && (
+            {section !== "fraud" && section !== "vpn-control" && section !== "vpn-api" && (
               <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
                 <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Globe className="w-4 h-4 text-emerald-400" /> IP Logs <span className="text-[9px] text-slate-500 font-mono ml-auto">{ipLogs.length} entries</span></h3>
                 <div className="overflow-x-auto max-h-64 overflow-y-auto border border-white/5 rounded-xl">
@@ -3439,10 +3863,20 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
               </div>
             )}
 
-            {section !== "logs" && (
+            {section !== "logs" && section !== "vpn-api" && (
               <>
                 <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
-                  <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Shield className="w-4 h-4 text-rose-400" /> Fraud Detection (VPN)</h3>
+                  <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Shield className="w-4 h-4 text-rose-400" /> Fraud Detection (VPN)
+                    {fraudUsers.length > 0 && (
+                      <button onClick={() => {
+                        const csv = "Username,Email,Country,Status\n" + fraudUsers.map((p) => `${p.username},${p.email},${p.country || ""},${p.vpn_detected ? "Flagged" : "Clean"}`).join("\n");
+                        const blob = new Blob([csv], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a"); a.href = url; a.download = "vpn-flagged-users.csv"; a.click();
+                        URL.revokeObjectURL(url);
+                      }} className="ml-auto px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[7px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer flex items-center gap-1"><Download className="w-2.5 h-2.5" /> Export</button>
+                    )}
+                  </h3>
                   {fraudUsers.length > 0 ? (
                     <div className="space-y-2">
                       {fraudUsers.map((p) => (
@@ -3479,7 +3913,7 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 </div>
               </>
             )}
-            {section !== "fraud" && section !== "vpn-control" && (
+            {section !== "fraud" && section !== "vpn-control" && section !== "vpn-api" && (
               <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 lg:col-span-2">
                 <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-cyan-400" /> Activity Logs</h3>
                 <div className="space-y-1 max-h-96 overflow-y-auto">
@@ -3502,6 +3936,13 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 onAction={(msg) => showNotif("success", msg)}
               />
             )}
+
+            {/* ── VPN API Configuration ── */}
+            {section === "vpn-api" && (
+              <div className="lg:col-span-2 space-y-4">
+                <VpnApiConfigSection showNotif={showNotif} />
+              </div>
+            )}
           </div>
         </div>
       );
@@ -3509,13 +3950,17 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
 
     // ═══ HOMEPAGE — Earn Page Sections ═══
     if (section === "homepage") {
-      const toggleSection = (key: string) => {
+      const toggleSection = async (key: string) => {
         const updated = { ...homepageSections, [key]: !homepageSections[key] };
         setHomepageSections(updated);
         localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
-        AdminDb.saveHomepageSections(updated).catch(() => {});
-        window.dispatchEvent(new CustomEvent("homepage-sections-changed"));
-        showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
+        try {
+          await AdminDb.saveHomepageSections(updated);
+          showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
+        } catch {
+          showNotif("error", `Failed to save homepage settings to database`);
+        }
+        window.dispatchEvent(new CustomEvent("homepage-sections-changed", { detail: updated }));
       };
       const sectionMeta: { key: string; label: string; icon: any; desc: string }[] = [
         { key: "featured", label: "Featured Offers", icon: Crown, desc: "Show the Featured Offers carousel on the earn page" },
@@ -3636,6 +4081,59 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
             )}
           </div>
 
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2"><Activity className="w-4 h-4 text-emerald-400" /> Live Activity Feed</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Control which activities appear in the live ticker.</p>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: "showEarnings", label: "Earnings", color: "emerald" },
+                { key: "showWithdrawals", label: "Withdrawals", color: "amber" },
+                { key: "showBonuses", label: "Bonuses", color: "purple" },
+                { key: "showReferrals", label: "Referrals", color: "cyan" },
+              ].map(({ key, label, color }) => {
+                const val = tickerAdminSettings[key as keyof typeof tickerAdminSettings];
+                return (
+                  <div key={key} className="flex items-center justify-between p-2 rounded-xl bg-slate-900/40 border border-white/5">
+                    <span className="text-[11px] font-semibold text-white">{label}</span>
+                    <button
+                      onClick={() => {
+                        const updated = { ...tickerAdminSettings, [key]: !val };
+                        setTickerAdminSettings(updated);
+                        saveTickerSettings(updated);
+                      }}
+                      className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${val ? `bg-${color}-500` : "bg-slate-700"}`}
+                      style={{ backgroundColor: val ? (color === "emerald" ? "#10b981" : color === "amber" ? "#f59e0b" : color === "purple" ? "#a855f7" : "#06b6d4") : undefined }}
+                    >
+                      <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: val ? "calc(100% - 18px)" : "2px" }} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div>
+              <label className="text-[9px] text-slate-500 uppercase block mb-2 font-mono">Speed</label>
+              <div className="flex gap-2">
+                {(["slow", "normal", "fast"] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      const updated = { ...tickerAdminSettings, speed: s };
+                      setTickerAdminSettings(updated);
+                      saveTickerSettings(updated);
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-[9px] font-bold font-mono uppercase transition-all cursor-pointer ${
+                      tickerAdminSettings.speed === s
+                        ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"
+                        : "bg-slate-900/40 text-slate-500 border border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
             <h3 className="font-bold text-sm text-white mb-4 flex items-center gap-2"><Settings className="w-4 h-4 text-amber-400" /> Developer Mode</h3>
             <div className="flex items-center justify-between">
@@ -3648,7 +4146,6 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
               </button>
             </div>
           </div>
-
 
           {/* ── Data Browser (inline) ── */}
           <DataBrowserCard />
@@ -3715,6 +4212,51 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                   <Unlock className="w-3 h-3 inline mr-1" /> Unrestrict
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => setDeleteModal(null)}>
+          <div className="max-w-sm w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setDeleteModal(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="w-6 h-6 text-rose-400" />
+            </div>
+            <h3 className="text-base font-bold text-white text-center mb-1">Permanently Delete User?</h3>
+            <p className="text-[10px] text-slate-400 font-mono text-center mb-4">This action cannot be undone.</p>
+
+            <div className="bg-slate-900/60 rounded-2xl p-4 space-y-2 mb-5 border border-white/5">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-slate-500 font-mono">Username</span>
+                <span className="text-xs font-bold text-white">{deleteModal.username}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-slate-500 font-mono">Email</span>
+                <span className="text-[10px] text-slate-300 font-mono">{deleteModal.email}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-slate-500 font-mono">Balance</span>
+                <span className="text-[10px] text-emerald-400 font-mono font-bold">{deleteModal.balance}</span>
+              </div>
+              <div className="border-t border-white/5 pt-2 mt-2">
+                <p className="text-[8px] text-rose-400/70 font-mono leading-relaxed">
+                  This will permanently remove the user's account, profile data, withdrawal requests,
+                  support tickets, KYC records, notifications, detection logs, and all associated data
+                  from both localStorage and Supabase.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteModal(null)} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">
+                Cancel
+              </button>
+              <button onClick={() => handleDeleteUser(deleteModal.userId)} className="flex-1 py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5" /> Delete Forever
+              </button>
             </div>
           </div>
         </div>

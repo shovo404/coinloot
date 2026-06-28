@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { Coins, Lock } from "lucide-react";
+import { Coins, Lock, Key } from "lucide-react";
 import { UserProfile } from "../types";
 import { LockedOfferwallConfig, isOfferwallUnlocked, addUserUnlock } from "../utils/lockedOfferwallDB";
 import { getProviderInfo, getProviderLogoUrl } from "../utils/providerLogos";
+import PromoUnlockModal from "./PromoUnlockModal";
 
 interface Props {
   key?: string;
@@ -28,6 +29,7 @@ function formatName(name: string): { first: string; rest: string; isGradient: bo
 
 export default function LockedOfferwallCard({ config, user, onUnlocked }: Props) {
   const [visible, setVisible] = useState(false);
+  const [promoOpen, setPromoOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 100);
@@ -251,7 +253,27 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
               <span className="text-gray-500 text-xs font-mono">/ {required.toLocaleString()} Coins</span>
             </div>
           </div>
+
+          <button
+            onClick={() => setPromoOpen(true)}
+            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:from-purple-600/30 hover:border-purple-500/40 transition-all cursor-pointer flex items-center justify-center gap-2 tracking-wider uppercase"
+          >
+            <Key className="w-3.5 h-3.5" />
+            Enter Promo Code
+          </button>
         </div>
+
+        {promoOpen && (
+          <PromoUnlockModal
+            offerwallName={config.providerName}
+            userId={user.id}
+            onSuccess={() => {
+              setPromoOpen(false);
+              onUnlocked(config.providerName);
+            }}
+            onClose={() => setPromoOpen(false)}
+          />
+        )}
 
         {/* ── Bottom Pagination ── */}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">

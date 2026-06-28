@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
+import { calcLevel } from "../utils/levelSystem";
 
 interface Ticket {
   id: string;
@@ -215,7 +216,7 @@ export default function ProfileSettingsSupport({
                   <div className="space-y-2">
                     <label className="text-[10px] font-mono text-slate-400 uppercase">Clearance Level status</label>
                     <div className="bg-slate-900 border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-slate-300">
-                      Level {user.level} (multiplier +{(user.level * 1.5).toFixed(1)}%)
+                      Level {calcLevel(user.balance_coins)} (multiplier +{(calcLevel(user.balance_coins) * 1.5).toFixed(1)}%)
                     </div>
                   </div>
                 </div>
@@ -365,7 +366,7 @@ export default function ProfileSettingsSupport({
                     </div>
 
                     <button
-                      onClick={() => setUser({ ...user, is_admin: !user.is_admin })}
+                      onClick={() => setUser({ ...user, is_admin: !user.is_admin, role: !user.is_admin ? 'admin' : 'user' })}
                       className={`w-14 h-8 rounded-full p-1 transition-all ${user.is_admin ? "bg-purple-600 text-white flex justify-end" : "bg-slate-800 text-slate-500 flex justify-start"}`}
                     >
                       <span className="w-6 h-6 rounded-full bg-white block" />

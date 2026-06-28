@@ -5,9 +5,9 @@ import {
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
+import { calcLevel } from "../utils/levelSystem";
 import { notifyWithdrawalRequest } from "../utils/adminNotifier";
 import { checkVpnStatus, getVpnSettings, isUserRestricted, restrictUser, logDetection } from "../utils/vpnDetector";
-import { calcLevelFromBalance } from "../utils/levelSystem";
 import { getWithdrawalMethods } from "../lib/supabaseService";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -147,21 +147,43 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
     setValidationErrors(errors);
     if (errors.length > 0) return;
 
-    // ── VPN Protection Check ──
-    const settings = getVpnSettings();
-    if (settings.withdrawalBlock) {
-      setVpnChecking(true);
+    // ── VPN Protection Check (skip for admins) ──
+    if (user.role !== 'admin') {
+      const settings = getVpnSettings();
+      if (settings.withdrawalBlock) {
+        setVpnChecking(true);
+        try {
+          const vpnResult = await checkVpnStatus();
+          logDetection(user.id, user.username, vpnResult);
+          if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
+            restrictUser(user.id, 30, "VPN detected during withdrawal request");
+            setVpnBlocked(true);
+            setVpnChecking(false);
+            return;
+          }
+        } catch { /* server check failed — allow through */ }
+        setVpnChecking(false);
+      }
+    }
+
+    // ── Server-side KYC Enforcement ──
+    if (user.kyc_required) {
       try {
-        const vpnResult = await checkVpnStatus();
-        logDetection(user.id, user.username, vpnResult);
-        if (vpnResult.isVpn || vpnResult.isProxy || vpnResult.isTor || vpnResult.isHosting) {
-          restrictUser(user.id, 30, "VPN detected during withdrawal request");
-          setVpnBlocked(true);
-          setVpnChecking(false);
+        const kycResp = await fetch(`/api/kyc/check/${user.id}`);
+        const kycData = await kycResp.json();
+        if (kycData.status !== "APPROVED") {
+          setValidationErrors([{ field: "account", message: "KYC verification required. Please complete KYC first." }]);
+          setWithdrawingState(false);
           return;
         }
-      } catch { /* server check failed — allow through */ }
-      setVpnChecking(false);
+      } catch {
+        // Server unreachable — fall back to local check
+        if (user.kyc_status !== "APPROVED") {
+          setValidationErrors([{ field: "account", message: "KYC verification required. Please complete KYC first." }]);
+          setWithdrawingState(false);
+          return;
+        }
+      }
     }
 
     setWithdrawingState(true);
@@ -174,7 +196,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
         balance_coins: finalCoins,
         balance_usd: finalCoins / 1000,
         total_withdrawn_usd: user.total_withdrawn_usd + usdValue,
-        level: calcLevelFromBalance(finalCoins)
+        level: calcLevel(finalCoins),
       });
 
       const newWd: WithdrawalRequest = {
@@ -331,11 +353,11 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
                       <span className={`px-2.5 py-1 text-[9px] font-bold rounded-lg ${
                         item.status === "PENDING"
                           ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                          : item.status === "APPROVED"
+                          : item.status === "APPROVED" || item.status === "PAID"
                           ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                           : "bg-red-500/10 text-red-400 border border-red-500/20"
                       }`}>
-                        {item.status}
+                        {item.status === "PAID" ? "COMPLETED" : item.status}
                       </span>
                     </div>
                   </div>

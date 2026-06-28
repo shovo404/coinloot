@@ -9,11 +9,12 @@ import { isUserRestricted } from "../utils/vpnDetector";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getProviderInfo, getProviderLogoUrl, getProviderDomain, getAllProviders } from "../utils/providerLogos";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
+import { calcLevel } from "../utils/levelSystem";
 
 interface OfferwallHubProps {
   user: UserProfile;
   setUser: (u: UserProfile) => void;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
   simulationCountry?: string;
 }
 
@@ -59,7 +60,7 @@ function evaluateLockRules(user: UserProfile, rules: LockRule[]): { locked: bool
     if (rule.type === "coins_earned" && user.total_earned_coins < rule.value) {
       return { locked: true, reason: `Earn ${rule.value.toLocaleString()} total coins to unlock` };
     }
-    if (rule.type === "level" && user.level < rule.value) {
+    if (rule.type === "level" && calcLevel(user.balance_coins) < rule.value) {
       return { locked: true, reason: `Reach Level ${rule.value} to unlock` };
     }
     if (rule.type === "tasks_completed" && (user.total_earned_coins / 100) < rule.value) {
@@ -171,13 +172,7 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
       const progressXp = offer.difficulty === "Easy" ? 50 : offer.difficulty === "Medium" ? 150 : 350;
       const newXp = user.xp + progressXp;
 
-      setUser({
-        ...user,
-        xp: newXp,
-        level: Math.floor(newXp / 1000) + 1,
-      });
-
-      onRewardEarned(pay, offer.provider, `Completed ${offer.title} from ${offer.provider}.`);
+      onRewardEarned(pay, offer.provider, `Completed ${offer.title} from ${offer.provider}.`, progressXp);
       setSubmittingTestEarn(false);
       setViewingOffer(null);
     }, 1800);

@@ -15,7 +15,7 @@ import { savePromoCodes as savePromoCodesDb } from "../lib/adminDb";
 interface RewardsStoreProps {
   user: UserProfile;
   setUser: (u: UserProfile) => void;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
 }
 
 interface SocialReward {
@@ -69,17 +69,10 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     }
 
     const pay = day.reward;
-    const newCoins = user.balance_coins + pay;
-    const newXp = user.xp + 100;
 
     setUser({
       ...user,
       streak_days: day.day,
-      balance_coins: newCoins,
-      balance_usd: newCoins / 1000,
-      xp: newXp,
-      level: Math.floor(newXp / 1000) + 1,
-      total_earned_coins: user.total_earned_coins + pay
     });
 
     const updated = [...dailyStreakProgress];
@@ -87,7 +80,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     setDailyStreakProgress(updated);
 
     playCoinSound();
-    onRewardEarned(pay, `Daily Streak`, `Day ${day.day} streak reward claimed! +${pay.toLocaleString()} coins.`);
+    onRewardEarned(pay, `Daily Streak`, `Day ${day.day} streak reward claimed! +${pay.toLocaleString()} coins.`, 100);
     alert(`Success! Multiplier Day ${day.day} verified. +${pay} coins accrued!`);
   };
 
@@ -128,13 +121,6 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         return;
       }
       const payout = match.coins;
-      const newCoins = user.balance_coins + payout;
-      setUser({
-        ...user,
-        balance_coins: newCoins,
-        balance_usd: newCoins / 1000,
-        total_earned_coins: user.total_earned_coins + payout,
-      });
       claimed.push(code);
       localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
       // Update usage count
@@ -152,13 +138,6 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         return;
       }
       const payout = hardcodedCodes[code];
-      const newCoins = user.balance_coins + payout;
-      setUser({
-        ...user,
-        balance_coins: newCoins,
-        balance_usd: newCoins / 1000,
-        total_earned_coins: user.total_earned_coins + payout,
-      });
       claimed.push(code);
       localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
       playCoinSound();
@@ -187,13 +166,6 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
           }
         }
         const payout = globalCoins;
-        const newCoins = user.balance_coins + payout;
-        setUser({
-          ...user,
-          balance_coins: newCoins,
-          balance_usd: newCoins / 1000,
-          total_earned_coins: user.total_earned_coins + payout,
-        });
         claimed.push(code);
         localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
         playCoinSound();
@@ -221,20 +193,9 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     const payout = challengeConfig.reward_coins;
     const bonusPayout = challengeConfig.bonus_coins;
     const totalPayout = payout + bonusPayout;
-    const newCoins = user.balance_coins + totalPayout;
-    const newXp = user.xp + 250;
-
-    setUser({
-      ...user,
-      balance_coins: newCoins,
-      balance_usd: newCoins / 1000,
-      xp: newXp,
-      level: Math.floor(newXp / 1000) + 1,
-      total_earned_coins: user.total_earned_coins + totalPayout
-    });
 
     playCoinSound();
-    onRewardEarned(totalPayout, "Weekly Elite Chest", `Weekly elite chest opened! +${totalPayout.toLocaleString()} coins credited.`);
+    onRewardEarned(totalPayout, "Weekly Elite Chest", `Weekly elite chest opened! +${totalPayout.toLocaleString()} coins credited.`, 250);
     alert(`Chest unlocked! Gained +${totalPayout.toLocaleString()} Coins and premium orbital badges!`);
   };
 
@@ -253,14 +214,6 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     window.open(socialRewards.find(r => r.id === rewardId)?.link, "_blank");
 
     setTimeout(() => {
-      const newCoins = user.balance_coins + payout;
-      setUser({
-        ...user,
-        balance_coins: newCoins,
-        balance_usd: newCoins / 1000,
-        total_earned_coins: user.total_earned_coins + payout
-      });
-
       setSocialRewards(prev => prev.map(r => r.id === rewardId ? { ...r, completed: true } : r));
       playCoinSound();
       onRewardEarned(payout, `Social Bounty`, `Social bounty "${name}" completed! +${payout.toLocaleString()} coins.`);

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Award, Sparkles, TrendingUp, Star, ChevronRight } from "lucide-react";
 import { getLevelTitle } from "../utils/levelSystem";
 
@@ -14,6 +14,11 @@ export default function LevelUpCelebration({ show, level, onDismiss }: LevelUpCe
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 
+  const dismiss = useCallback(() => {
+    setVisible(false);
+    setTimeout(() => onDismissRef.current(), 500);
+  }, []);
+
   useEffect(() => {
     if (!show) return;
     setVisible(true);
@@ -26,17 +31,17 @@ export default function LevelUpCelebration({ show, level, onDismiss }: LevelUpCe
     }));
     setParticles(p);
     const timer = setTimeout(() => {
-      setVisible(false);
-      setTimeout(() => onDismissRef.current(), 500);
+      dismiss();
     }, 4000);
     return () => clearTimeout(timer);
-  }, [show]);
+  }, [show, dismiss]);
 
   if (!show && !visible) return null;
 
   return (
     <div
-      className={`fixed inset-0 z-[100] flex items-center justify-center transition-all duration-500 ${
+      onClick={dismiss}
+      className={`fixed inset-0 z-[100] flex items-center justify-center transition-all duration-500 cursor-pointer ${
         visible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
       }`}
     >

@@ -8,7 +8,7 @@ interface Props {
   offer: Offer;
   user: UserProfile;
   onClose: () => void;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
 }
 
 const FALLBACK_STEPS: OfferStep[] = [

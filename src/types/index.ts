@@ -2,6 +2,7 @@ export interface UserProfile {
   id: string;
   username: string;
   email: string;
+  created_at?: string;
   balance_coins: number;
   balance_usd: number;
   xp: number;
@@ -14,7 +15,10 @@ export interface UserProfile {
   kyc_status: 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
   kyc_required: boolean;
   registration_ip?: string;
+  registration_country?: string;
+  registration_isp?: string;
   is_admin: boolean;
+  role: 'user' | 'admin';
   admin_role?: 'ADMIN';
   vpn_detected: boolean;
   device_fingerprint: string;
@@ -93,7 +97,7 @@ export interface WithdrawalRequest {
   payout_details: string;
   coins_deducted: number;
   usd_value: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAID';
   created_at: string;
 }
 

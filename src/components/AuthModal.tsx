@@ -4,6 +4,7 @@ import { UserProfile } from "../types";
 import { getSupabaseClient } from "../lib/supabase";
 import { signUp, signIn, getProfile, updateProfile } from "../lib/supabaseService";
 import { AVATAR_OPTIONS } from "../utils/avatarOptions";
+import { getDeviceFingerprint, fetchRegistrationInfo } from "../utils/registrationInfo";
 
 interface StoredAccount { email: string; password: string; username: string; profile: UserProfile; }
 
@@ -182,6 +183,18 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             setPendingProfile(profile);
             setPendingEmail(trimmedEmail);
             setPendingPassword(password);
+
+            // Store registration info (IP, country, ISP, device fingerprint)
+            fetchRegistrationInfo().then((geo) => {
+              const fingerprint = getDeviceFingerprint();
+              updateProfile(profile.id, {
+                registration_ip: geo.ip || undefined,
+                registration_country: geo.country || undefined,
+                registration_isp: geo.isp || undefined,
+                device_fingerprint: fingerprint,
+              }).catch(() => {});
+            });
+
             setTimeout(() => {
               setShowAvatarSelect(true);
               setLoading(false);

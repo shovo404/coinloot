@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Coins, LogIn, ShieldAlert, ShieldCheck, Award, Bell, User, Fingerprint, CheckCircle, AlertTriangle, Settings, LogOut, UserCog, Menu, X, Zap, Wallet, Trophy, Gift, ClipboardCheck, Users, MessageSquare } from "lucide-react";
 import { UserProfile } from "../types";
 import { getProviderInfo } from "../utils/providerLogos";
+import LevelProgress from "./LevelProgress";
+import { calcLevel } from "../utils/levelSystem";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,7 @@ export default function Navbar({
   const mobileNotifRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter((n) => n.unread).length;
+  const displayLevel = calcLevel(user?.balance_coins ?? 0);
 
   // Close dropdowns on outside click (supports both mouse and touch)
   useEffect(() => {
@@ -179,6 +182,21 @@ export default function Navbar({
               );
             })}
 
+            {/* Admin Panel Tab (only for admins) */}
+            {user.is_admin && (
+              <button
+                onClick={() => setActiveTab("admin-panel")}
+                className={`relative flex items-center gap-1.5 px-2.5 xl:px-3.5 py-1.5 rounded-lg text-[11px] xl:text-xs font-bold tracking-wider whitespace-nowrap transition-all duration-200 group ${
+                  activeTab === "admin-panel"
+                    ? "bg-gradient-to-r from-cyan-500/15 to-purple-600/15 border border-cyan-500/30 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.1)]"
+                    : "text-slate-500 border border-transparent hover:text-slate-200 hover:bg-white/[0.03]"
+                }`}
+              >
+                <ShieldCheck className={`w-3.5 h-3.5 transition-all ${activeTab === "admin-panel" ? "text-cyan-400" : "text-slate-500 group-hover:text-slate-300"}`} />
+                <span className="hidden xl:inline">Admin Panel</span>
+              </button>
+            )}
+
           </div>
         )}
 
@@ -256,7 +274,7 @@ export default function Navbar({
               {/* ── Level Badge ── */}
               <div className="hidden lg:flex items-center gap-1 bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl px-2.5 py-1.5">
                 <Award className="w-3.5 h-3.5 text-purple-400" />
-                <span className="text-[10px] font-mono text-purple-300 font-bold uppercase">LVL {user.level}</span>
+                <span className="text-[10px] font-mono text-purple-300 font-bold uppercase">LVL {displayLevel}</span>
               </div>
 
               {/* ── Notifications ── */}
@@ -308,7 +326,7 @@ export default function Navbar({
               {/* Level badge (compact) */}
               <div className="flex items-center gap-1 bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl px-2 py-1.5 min-h-[36px]">
                 <Award className="w-3 h-3 text-purple-400" />
-                <span className="text-[9px] font-mono text-purple-300 font-bold uppercase">LVL {user.level}</span>
+                <span className="text-[9px] font-mono text-purple-300 font-bold uppercase">LVL {displayLevel}</span>
               </div>
 
               {/* Notifications Bell */}
@@ -395,7 +413,7 @@ export default function Navbar({
                     </div>
                     <div className="bg-slate-900/60 p-3 rounded-xl text-center border border-white/5">
                       <Award className="w-4 h-4 text-purple-400 mx-auto mb-1" />
-                      <span className="block text-xs font-bold text-white">LVL {user.level}</span>
+                      <span className="block text-xs font-bold text-white">LVL {displayLevel}</span>
                       <span className="text-[10px] text-slate-500 font-mono">Level</span>
                     </div>
                     <div className="bg-slate-900/60 p-3 rounded-xl text-center border border-white/5">
@@ -403,6 +421,9 @@ export default function Navbar({
                       <span className="block text-xs font-bold text-white">{unreadCount}</span>
                       <span className="text-[10px] text-slate-500 font-mono">Unread</span>
                     </div>
+                  </div>
+                  <div className="px-4 pb-3">
+                    <LevelProgress user={user} compact />
                   </div>
 
                   {/* Dashboard Navigation */}
@@ -429,6 +450,20 @@ export default function Navbar({
                             </button>
                           );
                         })}
+                        {user.is_admin && (
+                          <button
+                            onClick={() => handleMobileNav("admin-panel")}
+                            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all ${
+                              activeTab === "admin-panel"
+                                ? "bg-gradient-to-r from-cyan-500/15 to-purple-600/15 border border-cyan-500/30 text-cyan-300"
+                                : "text-slate-400 hover:text-white hover:bg-white/[0.03] border border-transparent"
+                            }`}
+                          >
+                            <ShieldCheck className={`w-4 h-4 ${activeTab === "admin-panel" ? "text-cyan-400" : "text-slate-500"}`} />
+                            <span>Admin Panel</span>
+                            {activeTab === "admin-panel" && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -551,6 +586,9 @@ export default function Navbar({
                 <span className="block text-[10px] text-slate-400 font-mono truncate">{user.email}</span>
               </div>
             </div>
+            <div className="mt-3">
+              <LevelProgress user={user} compact />
+            </div>
           </div>
           <div className="p-2 space-y-0.5">
             <button onClick={() => { setActiveTab?.("my-profile"); setOpenDropdown(null); }} className="w-full px-3 py-3 md:py-2.5 rounded-xl text-xs text-left text-slate-300 hover:bg-white/[0.03] hover:text-white transition-all flex items-center gap-2.5 min-h-[44px] md:min-h-0">
@@ -569,6 +607,13 @@ export default function Navbar({
               )}
             </button>
           </div>
+          {user.is_admin && (
+            <div className="border-t border-white/5 p-2">
+              <button onClick={() => { setActiveTab?.("admin-panel"); setOpenDropdown(null); }} className="w-full px-3 py-3 md:py-2.5 rounded-xl text-xs text-left text-cyan-400 hover:bg-cyan-500/5 transition-all flex items-center gap-2.5 min-h-[44px] md:min-h-0">
+                <ShieldCheck className="w-4 h-4" /> Admin Panel
+              </button>
+            </div>
+          )}
           <div className="border-t border-white/5 p-2">
             <button onClick={() => { onLogout(); setOpenDropdown(null); }} className="w-full px-3 py-3 md:py-2.5 rounded-xl text-xs text-left text-rose-400 hover:bg-rose-500/5 transition-all flex items-center gap-2.5 min-h-[44px] md:min-h-0">
               <LogOut className="w-4 h-4" /> Logout

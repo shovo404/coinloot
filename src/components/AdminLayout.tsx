@@ -5,20 +5,22 @@ import {
   Coins, Award, Activity, Globe, Server, Menu, X, User as UserIcon,
   PanelRightClose, PanelRight, RefreshCw, ShieldCheck, ChevronLeft,
   MessageSquare, UserPlus, ExternalLink, Check,
+  AlertTriangle,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { AppNotification } from "./Navbar";
 import AdminPanel from "./AdminPanel";
+import AdminNotificationToast from "./AdminNotificationToast";
 import { getUnreadAdminCount, getPendingAdminNotifications, markAdminRead, markAllAdminRead, markAsDone, onAdminNotifChange, AdminNotification } from "../utils/adminNotifier";
 
 interface AdminLayoutProps {
   user: UserProfile;
-  onRewardEarned: (coins: number, sourceName: string, message?: string) => void;
+  onRewardEarned: (coins: number, sourceName: string, message?: string, xpGained?: number) => void;
   onLogout: () => void;
   notifications: AppNotification[];
 }
 
-interface SidebarItem {
+export interface SidebarItem {
   id: string;
   label: string;
   icon: any;
@@ -26,17 +28,13 @@ interface SidebarItem {
   children?: { id: string; label: string; badge?: string | number }[];
 }
 
-const SIDEBAR_ITEMS: SidebarItem[] = [
+export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
   { id: "offerwalls", label: "Offerwalls", icon: Zap },
-  { id: "offers", label: "Offers", icon: Activity },
-  { id: "locked-offers", label: "Lock Rules", icon: Lock },
-  { id: "locked-offers-management", label: "Offerwall Mgt", icon: ShieldCheck },
-  { id: "locked-offers-promos", label: "Lock Promos", icon: Gift },
+  { id: "offer-management", label: "Offer Management", icon: Activity },
   { id: "coins", label: "Coins & Rewards", icon: Coins },
   { id: "withdrawals", label: "Withdrawals", icon: Wallet },
-  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "promos", label: "Promo Codes", icon: Gift },
   { id: "referrals", label: "Referrals", icon: Link2 },
   { id: "tickets", label: "Tickets", icon: MessageSquare },
@@ -45,6 +43,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "rewards-challenges", label: "Rewards & Challenges", icon: Award },
   { id: "kyc", label: "KYC", icon: ShieldCheck },
   { id: "security", label: "Security", icon: ShieldAlert },
+  { id: "vpn-api", label: "VPN & Proxy", icon: Globe },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -71,10 +70,16 @@ function AdminHeader({ user, onLogout, userNotifs, onSectionChange }: { user: Us
   // Force re-render when dropdown opens to get fresh data
   useEffect(() => { if (showNotifDropdown) setRefreshKey(k => k + 1); }, [showNotifDropdown]);
 
-  const notifIcon = (type: string) => {
-    switch (type) {
+  const notifIcon = (n: AdminNotification) => {
+    const meta = (window as any).__NOTIF_META?.[n.type];
+    if (meta?.icon) return <span className="text-sm">{meta.icon}</span>;
+    switch (n.type) {
       case "new_user": return <UserPlus className="w-4 h-4 text-emerald-400" />;
       case "withdrawal_request": return <ExternalLink className="w-4 h-4 text-amber-400" />;
+      case "vpn_detected": return <ShieldAlert className="w-4 h-4 text-rose-400" />;
+      case "fraud_alert": return <AlertTriangle className="w-4 h-4 text-rose-400" />;
+      case "new_ticket": return <MessageSquare className="w-4 h-4 text-purple-400" />;
+      case "api_failure": case "vpn_api_failure": case "server_error": return <Server className="w-4 h-4 text-rose-400" />;
       default: return <Bell className="w-4 h-4 text-purple-400" />;
     }
   };
@@ -83,6 +88,9 @@ function AdminHeader({ user, onLogout, userNotifs, onSectionChange }: { user: Us
     switch (type) {
       case "new_user": return "bg-emerald-500/10 border-emerald-500/20";
       case "withdrawal_request": return "bg-amber-500/10 border-amber-500/20";
+      case "vpn_detected": case "fraud_alert": return "bg-rose-500/10 border-rose-500/20";
+      case "new_ticket": case "ticket_reply": return "bg-purple-500/10 border-purple-500/20";
+      case "api_failure": case "vpn_api_failure": case "server_error": return "bg-rose-500/10 border-rose-500/20";
       default: return "bg-purple-500/10 border-purple-500/20";
     }
   };
@@ -139,7 +147,7 @@ function AdminHeader({ user, onLogout, userNotifs, onSectionChange }: { user: Us
                         : "hover:bg-white/[0.04]"
                     }`}>
                       <div className={`w-8 h-8 rounded-xl ${notifBg(n.type)} flex items-center justify-center shrink-0`}>
-                        {notifIcon(n.type)}
+                        {notifIcon(n)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
@@ -211,10 +219,39 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
 }) {
   const isActive = (id: string) => activeSection === id;
 
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpandedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const handleClick = (id: string) => {
     onSectionChange(id);
     onMobileClose?.();
   };
+
+  const handleParentClick = (item: SidebarItem) => {
+    if (!item.children || item.children.length === 0) {
+      handleClick(item.id);
+      return;
+    }
+    const hasActiveChild = item.children.some(c => activeSection === c.id);
+    if (!hasActiveChild) {
+      // No child active → navigate to first child and expand
+      setExpandedItems(prev => { const next = new Set(prev); next.add(item.id); return next; });
+      handleClick(item.children[0].id);
+    } else {
+      // Child is active → toggle expand/collapse
+      toggleExpand(item.id);
+    }
+  };
+
+  const childActive = (childId: string) => activeSection === childId;
 
   return (
     <aside className={`h-screen bg-slate-950/95 border-r border-white/5 flex flex-col transition-all duration-300 z-40 ${collapsed ? "w-[72px]" : "w-[280px]"}`}>
@@ -240,11 +277,13 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
         {SIDEBAR_ITEMS.map((item) => {
           const Icon = item.icon;
           const itemActive = isActive(item.id);
+          const isExpanded = expandedItems.has(item.id);
+          const hasChildren = item.children && item.children.length > 0;
 
           if (collapsed) {
             return (
               <div key={item.id} className="relative group">
-                <button onClick={() => handleClick(item.id)}
+                <button onClick={() => handleClick(hasChildren ? (item.children![0].id) : item.id)}
                   className="w-full flex items-center justify-center p-2.5 rounded-xl transition-all cursor-pointer">
                   <Icon className={`w-4 h-4 ${itemActive ? "text-cyan-400" : "text-slate-500 group-hover:text-slate-300"}`} />
                   {itemActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-cyan-400 rounded-full shadow-[0_0_6px_rgba(6,182,212,0.5)]" />}
@@ -257,12 +296,36 @@ function AdminSidebar({ activeSection, onSectionChange, collapsed, onToggle, onM
           }
 
           return (
-            <button key={item.id} onClick={() => handleClick(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-semibold tracking-wide transition-all cursor-pointer ${itemActive ? "bg-gradient-to-r from-cyan-500/10 to-purple-600/5 border border-cyan-500/20 text-cyan-300" : "text-slate-400 hover:text-white hover:bg-white/[0.03] border border-transparent"}`}>
-              <Icon className={`w-4 h-4 shrink-0 ${itemActive ? "text-cyan-400" : "text-slate-500"}`} />
-              <span className="flex-1 text-left truncate">{item.label}</span>
-              {item.badge && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">{item.badge}</span>}
-            </button>
+            <div key={item.id}>
+              <button onClick={() => hasChildren ? handleParentClick(item) : handleClick(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-semibold tracking-wide transition-all cursor-pointer ${itemActive ? "bg-gradient-to-r from-cyan-500/10 to-purple-600/5 border border-cyan-500/20 text-cyan-300" : "text-slate-400 hover:text-white hover:bg-white/[0.03] border border-transparent"}`}>
+                <Icon className={`w-4 h-4 shrink-0 ${itemActive ? "text-cyan-400" : "text-slate-500"}`} />
+                <span className="flex-1 text-left truncate">{item.label}</span>
+                {item.badge && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">{item.badge}</span>}
+                {hasChildren && (
+                  <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                )}
+              </button>
+              {hasChildren && isExpanded && (
+                <div className="ml-6 mt-0.5 space-y-0.5 border-l border-white/5 pl-2">
+                  {item.children!.map(child => (
+                    <button
+                      key={child.id}
+                      onClick={() => handleClick(child.id)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-medium tracking-wide transition-all cursor-pointer ${
+                        childActive(child.id)
+                          ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                          : "text-slate-500 hover:text-white hover:bg-white/[0.03] border border-transparent"
+                      }`}
+                    >
+                      <span className={`w-1 h-1 rounded-full ${childActive(child.id) ? "bg-cyan-400" : "bg-slate-600"}`} />
+                      <span className="truncate">{child.label}</span>
+                      {child.badge && <span className="px-1 py-0.5 rounded text-[7px] font-bold bg-cyan-500/10 text-cyan-400">{child.badge}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -334,6 +397,7 @@ export default function AdminLayout({ user, onRewardEarned, onLogout, notificati
           <AdminPanel user={user} onRewardEarned={onRewardEarned} activeSection={activeSection} onSectionChange={setActiveSection} />
         </div>
       </div>
+      <AdminNotificationToast />
     </div>
   );
 }

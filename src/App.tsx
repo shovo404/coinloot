@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LogIn, ShieldCheck, Zap, Users, ChevronRight, Wallet, Trophy, Gift, MessageSquare } from "lucide-react";
 import { AppNotification } from "./components/Navbar";
@@ -6,10 +6,12 @@ import { playCoinSound, playNotificationSound } from "./utils/coinSound";
 import RewardPopup, { usePopupQueue } from "./components/RewardPopup";
 import LevelUpCelebration from "./components/LevelUpCelebration";
 import KycUploadPage from "./components/KycUploadPage";
-import { checkVpnStatus, isUserRestricted, logDetection, VpnCheckResult, getVpnSettings } from "./utils/vpnDetector";
-import { calcLevelFromBalance } from "./utils/levelSystem";
+import { checkVpnStatus, isUserRestricted, logDetection, checkAutoRestrict, VpnCheckResult, getVpnSettings } from "./utils/vpnDetector";
+import { createAdminNotification, notifyVpnDetection } from "./utils/adminNotifier";
+import { calcLevel } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 import { getSupabaseClient, getCurrentSession, getCurrentUser } from "./lib/supabase";
+import { ActivityFeedItem, getDemoFeed, getStoredFeed, saveFeed, filterFeedBySettings, getTickerSettings, getSpeedMs, buildActivityMessage, mergeFeeds } from "./utils/activityFeed";
 import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting, markNotificationRead } from "./lib/supabaseService";
 import { realtimeManager } from "./lib/realtimeManager";
 import { AppRealtimeProvider } from "./hooks/useAppRealtimeState";
@@ -22,7 +24,7 @@ import EarnPage from "./components/EarnPage";
 import RewardsStore from "./components/RewardsStore";
 import ReferralsAffiliates from "./components/ReferralsAffiliates";
 import LeaderboardPodium from "./components/LeaderboardPodium";
-import AdminLayout from "./components/AdminLayout";
+import AdminDashboardPanel from "./components/AdminDashboardPanel";
 import VpnBlockPopup from "./components/VpnBlockPopup";
 import RestrictionPage from "./components/RestrictionPage";
 import SurveyHub from "./components/SurveyHub";
@@ -70,6 +72,16 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false); // prevent flash of unauthenticated UI
+
+  // Derive correct level from balance_coins on every render
+  const correctedProfile = useMemo(() => {
+    if (!userProfile) return null;
+    const correctLevel = calcLevel(userProfile.balance_coins);
+    if (userProfile.level !== correctLevel) {
+      return { ...userProfile, level: correctLevel };
+    }
+    return userProfile;
+  }, [userProfile?.level, userProfile?.balance_coins]);
   const supabase = getSupabaseClient();
 
   const location = useLocation();
@@ -87,9 +99,6 @@ export default function App() {
     '/security': 'security-settings',
     '/kyc': 'kyc-upload',
     '/referrals': 'affiliates',
-    '/admin': 'admin',
-    '/admin/login': 'admin',
-    '/admin/dashboard': 'admin',
   };
   const TAB_TO_PATH: Record<string, string> = {
     'offers': '/earn',
@@ -102,7 +111,6 @@ export default function App() {
     'security-settings': '/security',
     'kyc-upload': '/kyc',
     'affiliates': '/referrals',
-    'admin': '/admin',
   };
 
   const [isDashboardView, setIsDashboardView] = useState(false);
@@ -125,9 +133,11 @@ export default function App() {
   useEffect(() => { usernameRef.current = userProfile?.username || "User"; }, [userProfile?.username]);
   useEffect(() => { userIdRef.current = userProfile?.id || ""; }, [userProfile?.id]);
 
-  // ── Sequential ticker rotation ──
+  // ── Activity ticker ──
+  const [activityFeed, setActivityFeed] = useState<ActivityFeedItem[]>([]);
   const [currentTickerIdx, setCurrentTickerIdx] = useState(0);
   const [tickerVisible, setTickerVisible] = useState(true);
+  const [tickerSettings, setTickerSettings] = useState(getTickerSettings());
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SUPABASE AUTH SESSION — Load existing session on mount & listen for changes
@@ -154,11 +164,12 @@ export default function App() {
             if (session?.user) {
               const profile = await getProfile(session.user.id);
               if (profile) {
+                const correctedLevel = calcLevel(profile.balance_coins);
+                if (profile.level !== correctedLevel) {
+                  profile.level = correctedLevel;
+                }
                 setUserProfile(profile);
                 setIsDashboardView(true);
-                if (profile.is_admin) {
-                  setActiveTab("admin");
-                }
               }
             }
           } else if (event === "SIGNED_OUT") {
@@ -198,11 +209,14 @@ export default function App() {
 
           if (userProfile_data && !cancelled) {
             console.log("[Auth] Restored profile:", userProfile_data.username, "admin:", userProfile_data.is_admin);
+            // Normalise level from wallet balance immediately
+            const correctedLevel = calcLevel(userProfile_data.balance_coins);
+            if (userProfile_data.level !== correctedLevel) {
+              userProfile_data = { ...userProfile_data, level: correctedLevel };
+              updateProfile(userProfile_data.id, { level: correctedLevel }).catch(() => {});
+            }
             setUserProfile(userProfile_data);
             setIsDashboardView(true);
-            if (userProfile_data.is_admin) {
-              setActiveTab("admin");
-            }
           }
         }
 
@@ -231,16 +245,20 @@ export default function App() {
   useEffect(() => {
     if (userProfile && !profileLoadedRef.current) {
       profileLoadedRef.current = true;
-      prevLevelRef.current = calcLevelFromBalance(userProfile.balance_coins);
+      prevLevelRef.current = calcLevel(userProfile.balance_coins);
     }
   }, [userProfile]);
 
-  // ── Recalculate level from current balance ──
+  // ── Recalculate level from wallet balance ──
   useEffect(() => {
     if (!userProfile) return;
-    const correctLevel = calcLevelFromBalance(userProfile.balance_coins);
-    if (userProfile.level !== correctLevel) {
+
+    const correctLevel = calcLevel(userProfile.balance_coins);
+    const needsLevelFix = userProfile.level !== correctLevel;
+
+    if (needsLevelFix) {
       setUserProfile(prev => prev ? { ...prev, level: correctLevel } : prev);
+      updateProfile(userProfile.id, { level: correctLevel }).catch(() => {});
     }
   }, [userProfile?.balance_coins]);
 
@@ -275,16 +293,60 @@ export default function App() {
   // ── Withdrawals from Supabase ──
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
 
+  const loadWithdrawals = useCallback(async () => {
+    if (!userProfile) return;
+    try {
+      const data = await getWithdrawals();
+      setWithdrawals(data);
+    } catch {}
+  }, [userProfile?.id]);
+
   useEffect(() => {
     if (!userProfile) {
       setWithdrawals([]);
       return;
     }
-    getWithdrawals().then(setWithdrawals).catch(() => {});
-  }, [userProfile?.id]);
+    loadWithdrawals();
+  }, [userProfile?.id, loadWithdrawals]);
 
-  // ── Live earnings feed from Supabase ──
+  // Poll withdrawals for status changes (for cross-tab/localStorage sync)
+  useEffect(() => {
+    if (!userProfile) return;
+    const interval = setInterval(() => {
+      loadWithdrawals();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [userProfile?.id, loadWithdrawals]);
+
+  // Listen for custom withdrawal-status-changed event for instant updates
+  useEffect(() => {
+    const handler = () => loadWithdrawals();
+    window.addEventListener("withdrawal-status-changed", handler);
+    return () => window.removeEventListener("withdrawal-status-changed", handler);
+  }, [loadWithdrawals]);
+
+  // ── Activity feed (live earnings + demo data) ──
   const [liveEarnerFeed, setLiveEarnerFeed] = useState<Array<{ id: string; user: string; provider: string; coins: number }>>([]);
+
+  // Build activityFeed from liveEarnerFeed + demo data + stored feed
+  useEffect(() => {
+    const live: ActivityFeedItem[] = liveEarnerFeed.map((item, i) => ({
+      id: item.id,
+      username: item.user,
+      activityType: "earning" as const,
+      provider: item.provider,
+      coins: item.coins,
+      message: "",
+      createdAt: new Date(Date.now() - i * 10000).toISOString(),
+    }));
+    const stored = getStoredFeed();
+    // Merge real feed with demos if we have fewer than 10 real entries
+    const merged = live.length >= 5 ? live : mergeFeeds([...live, ...stored], getDemoFeed());
+    const filtered = filterFeedBySettings(merged, tickerSettings);
+    if (filtered.length > 0) {
+      setActivityFeed(filtered);
+    }
+  }, [liveEarnerFeed, tickerSettings]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -302,7 +364,7 @@ export default function App() {
           return;
         }
 
-        if (data) {
+        if (data && data.length > 0) {
           setLiveEarnerFeed(data.map((item: any, idx: number) => ({
             id: `fe-${idx}`,
             user: item.username,
@@ -315,16 +377,30 @@ export default function App() {
 
     loadFeed();
 
-    // Subscribe to new live earnings
     const channel = supabase.channel("live_earnings_changes")
       .on("postgres_changes",
         { event: "INSERT", schema: "public", table: "live_earnings" },
         (payload: any) => {
           const item = payload.new;
+          const newEntry: ActivityFeedItem = {
+            id: `act-${Date.now()}`,
+            username: item.username,
+            activityType: "earning",
+            provider: item.provider,
+            coins: item.coins_earned,
+            message: "",
+            createdAt: new Date().toISOString(),
+          };
           setLiveEarnerFeed(prev => [
             { id: `fe-${Date.now()}`, user: item.username, provider: item.provider, coins: item.coins_earned },
             ...prev.slice(0, 9)
           ]);
+          // Also broadcast to stored feed
+          setActivityFeed(prev => {
+            const updated = filterFeedBySettings([newEntry, ...prev], tickerSettings);
+            saveFeed(updated);
+            return updated;
+          });
         }
       )
       .subscribe((status: string) => {
@@ -336,7 +412,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, [supabase, tickerSettings]);
 
   // ── Realtime notification subscriptions ──
   useEffect(() => {
@@ -415,6 +491,23 @@ export default function App() {
     };
   }, [userProfile?.id, supabase]);
 
+  // ── Realtime withdrawal sync ──
+  useEffect(() => {
+    if (!supabase) return;
+    // Subscribe to all withdrawal changes so both admin and user panels update
+    const cleanup = realtimeManager.subscribe("app-withdrawals", {
+      table: "withdrawals",
+      event: "UPDATE",
+      callback: () => {
+        loadWithdrawals();
+      },
+    });
+    return () => {
+      realtimeManager.unsubscribe("app-withdrawals");
+      cleanup();
+    };
+  }, [supabase, loadWithdrawals]);
+
   // ── Notifications from Supabase + localStorage ──
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const prevNotifIdsRef = useRef<Set<string>>(new Set());
@@ -443,7 +536,7 @@ export default function App() {
         if (Array.isArray(stored) && stored.length > 0) {
           const existingIds = new Set(mapped.map((m) => m.id));
           for (const n of stored) {
-            if (n.id && !existingIds.has(n.id)) {
+            if (n.id && !existingIds.has(n.id) && (!n.user_id || n.user_id === userProfile.id)) {
               mapped.push({
                 id: n.id,
                 title: n.title || "",
@@ -514,7 +607,7 @@ export default function App() {
     try {
       const stored = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
       if (Array.isArray(stored)) {
-        const merged = [newNotif, ...stored.filter((n: any) => n.id !== newNotif.id)].slice(0, 50);
+        const merged = [{ ...newNotif, user_id: userIdRef.current }, ...stored.filter((n: any) => n.id !== newNotif.id)].slice(0, 50);
         localStorage.setItem("coinloot_notifications", JSON.stringify(merged));
       }
     } catch {}
@@ -555,23 +648,42 @@ export default function App() {
     } catch {}
   }, []);
 
-  // ── Centralized Reward Handler ──
-  const handleRewardEarned = useCallback((coins: number, sourceName: string, message?: string) => {
+  const userProfileRef = useRef(userProfile);
+  userProfileRef.current = userProfile;
+
+  // ── Centralized Reward Handler (single source of truth for coins, level, xp) ──
+  const handleRewardEarned = useCallback((coins: number, sourceName: string, message?: string, xpGained?: number) => {
     if (coins <= 0) return;
-    if (userProfile?.status === "restricted" || userProfile?.status === "banned") return;
+    const profile = userProfileRef.current;
+    if (profile?.status === "restricted" || profile?.status === "banned") return;
 
     const finalMessage = message || `You earned ${coins.toLocaleString()} coins from ${sourceName}.`;
+
+    // Compute new values inside the functional updater so we always use the
+    // latest state (prev), never a stale closure/ref copy.
+    let dbUpd: Record<string, any> | null = null;
+    let dbUserId: string | undefined;
+    let newLevel = 0;
 
     setUserProfile((prev) => {
       if (!prev) return prev;
       const newCoins = prev.balance_coins + coins;
       const newTotalEarned = prev.total_earned_coins + coins;
+      const newXp = xpGained ? prev.xp + xpGained : prev.xp;
+      newLevel = calcLevel(newCoins);
+      dbUpd = {
+        balance_coins: newCoins,
+        level: newLevel,
+      };
+      if (xpGained) dbUpd.xp = newXp;
+      dbUserId = prev.id;
       return {
         ...prev,
         balance_coins: newCoins,
         balance_usd: newCoins / 1000,
         total_earned_coins: newTotalEarned,
-        level: calcLevelFromBalance(newCoins),
+        level: newLevel,
+        xp: newXp,
       };
     });
 
@@ -585,30 +697,17 @@ export default function App() {
       sourceName
     );
 
-    addPopup({
-      id: `rp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      sourceName,
-      coins,
-      message: finalMessage,
-    });
-
-    // Persist to Supabase
-    if (userProfile) {
-      updateProfile(userProfile.id, {
-        balance_coins: (userProfile.balance_coins + coins),
-        total_earned_coins: (userProfile.total_earned_coins + coins),
-      }).catch(() => {});
+    // Persist to Supabase using values computed from the functional updater
+    if (dbUpd && dbUserId) {
+      updateProfile(dbUserId, dbUpd).catch(() => {});
     }
 
-    // Level-up check
+    // Level-up check using computed newLevel
     const oldLevel = prevLevelRef.current;
-    if (userProfile) {
-      const newLevel = calcLevelFromBalance(userProfile.balance_coins + coins);
-      if (newLevel > oldLevel) {
-        setLevelUpLevel(newLevel);
-        setShowLevelUp(true);
-        prevLevelRef.current = newLevel;
-      }
+    if (newLevel > oldLevel) {
+      setLevelUpLevel(newLevel);
+      setShowLevelUp(true);
+      prevLevelRef.current = newLevel;
     }
 
     // Update live feed
@@ -616,29 +715,43 @@ export default function App() {
       { id: `fe-${Math.random()}`, user: usernameRef.current, provider: sourceName, coins },
       ...prev.slice(0, 9)
     ]);
+    // Also add to activity feed
+    const newAct: ActivityFeedItem = {
+      id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      username: usernameRef.current,
+      activityType: "earning",
+      provider: sourceName,
+      coins,
+      message: "",
+      createdAt: new Date().toISOString(),
+    };
+    setActivityFeed(prev => {
+      const updated = filterFeedBySettings([newAct, ...prev], tickerSettings);
+      saveFeed(updated);
+      return updated;
+    });
 
+  }, [setUserProfile, addNotification, supabase, tickerSettings]);
 
-  }, [setUserProfile, addNotification, addPopup, userProfile, supabase]);
-
-  // ── Rotate live ticker every 4s ──
+  // ── Rotate activity ticker ──
   useEffect(() => {
-    if (liveEarnerFeed.length === 0) return;
+    if (activityFeed.length === 0) return;
+    const speed = getSpeedMs(tickerSettings.speed);
     const interval = setInterval(() => {
       setTickerVisible(false);
       setTimeout(() => {
-        setCurrentTickerIdx(prev => (prev + 1) % liveEarnerFeed.length);
+        setCurrentTickerIdx(prev => (prev + 1) % activityFeed.length);
         setTickerVisible(true);
       }, 400);
-    }, 4000);
+    }, speed);
     return () => clearInterval(interval);
-  }, [liveEarnerFeed.length]);
+  }, [activityFeed.length, tickerSettings.speed]);
 
-  // Reset ticker index when feed shrinks
   useEffect(() => {
-    if (liveEarnerFeed.length > 0 && currentTickerIdx >= liveEarnerFeed.length) {
+    if (activityFeed.length > 0 && currentTickerIdx >= activityFeed.length) {
       setCurrentTickerIdx(0);
     }
-  }, [liveEarnerFeed.length]);
+  }, [activityFeed.length]);
 
   // ── VPN Detection ──
   const vpnDetectedRef = useRef(false);
@@ -647,20 +760,22 @@ export default function App() {
 
   useEffect(() => {
     if (!userProfile) return;
+    // Admin accounts completely bypass VPN checking
+    if (userProfile.role === 'admin') return;
 
     let mounted = true;
     const runVpnCheck = async () => {
       const result = await checkVpnStatus();
       if (!mounted || !userProfile) return;
 
-      if (result.isVpn) {
+      if (result.isVpn || result.isProxy || result.isTor || result.isHosting) {
         setLastVpnResult(result);
         setVpnBlocked(true);
 
         if (!vpnDetectedRef.current) {
           vpnDetectedRef.current = true;
 
-          logDetection(userProfile.id, userProfile.username, result);
+          logDetection(userProfile.id, userProfile.username, result, userProfile.email);
 
           setUserProfile((prev) => {
             if (!prev) return prev;
@@ -672,9 +787,30 @@ export default function App() {
           const settings = getVpnSettings();
           if (settings.vpnWarning) {
             addNotification(
-              "VPN Detected!",
-              "Our system detected a VPN or proxy connection. Please disable it immediately to continue using the platform.",
+              "VPN/Proxy Detected!",
+              "Our system detected a VPN, proxy, or TOR connection. Please disable it immediately to continue using the platform.",
               "security"
+            );
+          }
+
+          // Notify admin panel
+          notifyVpnDetection(
+            userProfile.id,
+            userProfile.username,
+            userProfile.email,
+            result.ip,
+            result.country,
+            result.detectionType,
+            result.fraudScore,
+            result.isp
+          );
+
+          // Check auto-restriction rules
+          if (checkAutoRestrict(userProfile.id, userProfile.username)) {
+            addNotification(
+              "Account Restricted",
+              "Your account has been automatically restricted due to multiple VPN/proxy detections.",
+              "system"
             );
           }
         }
@@ -685,7 +821,7 @@ export default function App() {
     };
 
     runVpnCheck();
-    const interval = setInterval(runVpnCheck, 5 * 60 * 1000);
+    const interval = setInterval(runVpnCheck, 30 * 1000);
     const handleVisibility = () => {
       if (document.visibilityState === "visible") runVpnCheck();
     };
@@ -720,6 +856,13 @@ export default function App() {
     return () => clearInterval(interval);
   }, [userProfile?.id]);
 
+  // ── Redirect non-admin away from admin-panel ──
+  useEffect(() => {
+    if (activeTab === "admin-panel" && userProfile && !userProfile.is_admin) {
+      setActiveTab("offers");
+    }
+  }, [activeTab, userProfile]);
+
   const handleAddNewWithdrawalRequest = useCallback(async (req: WithdrawalRequest) => {
     if (userProfile?.status === "restricted" || userProfile?.status === "banned") return;
     setWithdrawals(prev => [req, ...prev]);
@@ -750,13 +893,13 @@ export default function App() {
 
   // Auth handlers
   const handleLogin = useCallback((profile: UserProfile) => {
+    const correctedLevel = calcLevel(profile.balance_coins);
+    if (profile.level !== correctedLevel) {
+      profile = { ...profile, level: correctedLevel };
+    }
     setUserProfile(profile);
     setIsDashboardView(true);
-    if (profile.is_admin) {
-      setActiveTab("admin");
-    } else {
-      setActiveTab("offers");
-    }
+    setActiveTab("offers");
   }, []);
 
   const handleOpenAuth = () => setIsAuthModalOpen(true);
@@ -821,27 +964,11 @@ export default function App() {
 
   return (
     <AppRealtimeProvider>
-      {userProfile && userProfile.is_admin && isDashboardView ? (
-        <div className="relative w-full min-h-screen text-slate-100 font-sans bg-slate-950">
-          <DeveloperModeBanner />
-          <AdminLayout
-            user={userProfile}
-            onRewardEarned={handleRewardEarned}
-            onLogout={handleLogout}
-            notifications={notifications}
-          />
-          <LevelUpCelebration show={showLevelUp} level={levelUpLevel} onDismiss={() => setShowLevelUp(false)} />
-          <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuth} onLogin={handleLogin} />
-          {userProfile && <RestrictionPage userId={userProfile.id} />}
-          {vpnBlocked && lastVpnResult && <VpnBlockPopup result={lastVpnResult} onRetry={() => { const run = async () => { const r = await checkVpnStatus(); setVpnBlocked(r.isVpn); setLastVpnResult(r); }; run(); }} onRefresh={() => window.location.reload()} />}
-          <RewardPopup popups={rewardPopups} onDismiss={dismissPopup} />
-        </div>
-      ) : (
-        <div className="relative overflow-x-hidden w-full min-h-screen text-slate-100 flex flex-col font-sans transition-all selection:bg-cyan-500/20 selection:text-cyan-200 bg-slate-950">
+      <div className="relative overflow-x-hidden w-full min-h-screen text-slate-100 flex flex-col font-sans transition-all selection:bg-cyan-500/20 selection:text-cyan-200 bg-slate-950">
       <AnimatedBackground />
       <DeveloperModeBanner />
       <Navbar
-        user={userProfile}
+        user={correctedProfile}
         onOpenAuth={handleOpenAuth}
         notifications={notifications}
         onMarkNotificationRead={handleMarkNotificationRead}
@@ -1202,35 +1329,79 @@ export default function App() {
           </div>
         )}
 
-        {/* ═══════ LIVE EARNINGS TICKER (sequential) ═══════ */}
-        {isDashboardView && userProfile && (
+        {/* ═══════ LIVE ACTIVITY TICKER (vertical smooth rotation) ═══════ */}
+        {isDashboardView && userProfile && activeTab !== "admin-panel" && (
           <div className="border-b border-white/5 bg-slate-950/80 backdrop-blur-xl px-3 sm:px-4 lg:px-8">
             <div className="max-w-7xl mx-auto">
-              <div className="py-2 overflow-hidden">
-                {liveEarnerFeed.length > 0 ? (
-                  <div
-                    className={`flex items-center justify-center sm:justify-start gap-2 sm:gap-3 transition-all duration-[400ms] ${
-                      tickerVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                    {liveEarnerFeed[currentTickerIdx].user === usernameRef.current ? (
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/20 font-sans shrink-0">
-                        YOU
-                      </span>
-                    ) : (
-                      <span className="font-sans font-semibold text-slate-300 whitespace-nowrap text-[10px] sm:text-xs">
-                        {liveEarnerFeed[currentTickerIdx].user}
-                      </span>
-                    )}
-                    <span className="text-slate-500 text-[10px] sm:text-xs whitespace-nowrap">earned</span>
-                    <span className="font-bold text-emerald-400 text-[10px] sm:text-xs whitespace-nowrap">
-                      {liveEarnerFeed[currentTickerIdx].coins.toLocaleString()} coins
-                    </span>
-                    <span className="text-slate-500 text-[10px] sm:text-xs whitespace-nowrap">from</span>
-                    <span className="text-purple-300 text-[10px] sm:text-xs whitespace-nowrap">
-                      {liveEarnerFeed[currentTickerIdx].provider}
-                    </span>
+              <div className="py-2 overflow-hidden relative" style={{ minHeight: "2rem" }}>
+                {activityFeed.length > 0 ? (
+                  <div className="flex items-center justify-center sm:justify-start gap-2 sm:gap-3 relative">
+                    {/* Live dot */}
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0 relative z-10" />
+                    {/* Ticker item with vertical slide transition */}
+                    <div className="relative overflow-hidden" style={{ height: "1.25rem" }}>
+                      <div
+                        className={`transition-all duration-[400ms] ease-in-out ${
+                          tickerVisible
+                            ? "translate-y-0 opacity-100"
+                            : "translate-y-3 opacity-0"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap text-[10px] sm:text-xs">
+                          <span>{activityFeed[currentTickerIdx].username === usernameRef.current ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/20 font-sans shrink-0">
+                              YOU
+                            </span>
+                          ) : (
+                            <span className="font-sans font-semibold text-slate-300">
+                              {activityFeed[currentTickerIdx].username.slice(0, 1)}***
+                              {activityFeed[currentTickerIdx].username.slice(-1)}
+                            </span>
+                          )}</span>
+                          {activityFeed[currentTickerIdx].activityType === "earning" && (
+                            <>
+                              <span className="text-slate-500">earned</span>
+                              <span className="font-bold text-emerald-400">
+                                {activityFeed[currentTickerIdx].coins.toLocaleString()} coins
+                              </span>
+                              {activityFeed[currentTickerIdx].provider && (
+                                <><span className="text-slate-500">from</span>
+                                <span className="text-purple-300">{activityFeed[currentTickerIdx].provider}</span></>
+                              )}
+                            </>
+                          )}
+                          {activityFeed[currentTickerIdx].activityType === "withdrawal" && (
+                            <>
+                              <span className="text-slate-500">withdrew</span>
+                              <span className="font-bold text-amber-400">
+                                {activityFeed[currentTickerIdx].coins.toLocaleString()} coins
+                              </span>
+                              {activityFeed[currentTickerIdx].provider && (
+                                <><span className="text-slate-500">via</span>
+                                <span className="text-purple-300">{activityFeed[currentTickerIdx].provider}</span></>
+                              )}
+                            </>
+                          )}
+                          {activityFeed[currentTickerIdx].activityType === "bonus" && (
+                            <>
+                              <span className="text-slate-500">received</span>
+                              <span className="font-bold text-purple-400">
+                                {activityFeed[currentTickerIdx].coins.toLocaleString()} bonus coins
+                              </span>
+                            </>
+                          )}
+                          {activityFeed[currentTickerIdx].activityType === "referral" && (
+                            <>
+                              <span className="text-slate-500">earned</span>
+                              <span className="font-bold text-cyan-400">
+                                {activityFeed[currentTickerIdx].coins.toLocaleString()} coins
+                              </span>
+                              <span className="text-slate-500">from referral</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center justify-center sm:justify-start gap-2 font-mono text-[10px] text-slate-500">
@@ -1245,8 +1416,10 @@ export default function App() {
 
         {/* ═══════ DASHBOARD VIEW ═══════ */}
         {isDashboardView && userProfile && (
-          <div className="animate-fade-in pb-24 lg:pb-8">
-            {isRestricted && (activeTab === "offers" || activeTab === "withdraw" || activeTab === "rewards" || activeTab === "kyc-upload" || activeTab === "affiliates") ? (
+          <div className={activeTab === "admin-panel" ? "pb-0" : "animate-fade-in pb-24 lg:pb-8"}>
+            {activeTab === "admin-panel" && userProfile?.is_admin ? (
+              <AdminDashboardPanel user={correctedProfile} onRewardEarned={handleRewardEarned} onBack={() => setActiveTab("offers")} />
+            ) : isRestricted && (activeTab === "offers" || activeTab === "withdraw" || activeTab === "rewards" || activeTab === "kyc-upload" || activeTab === "affiliates") ? (
               <div className="max-w-lg mx-auto mt-12 text-center p-8">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
                   <ShieldCheck className="w-8 h-8 text-rose-400" />
@@ -1260,33 +1433,33 @@ export default function App() {
             ) : (
               <>
                 {activeTab === "offers" && (
-                  <EarnPage user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
+                  <EarnPage user={correctedProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} simulationCountry={simulationCountry} />
                 )}
                 {activeTab === "withdraw" && (
-                  <WithdrawHub user={userProfile} setUser={setUserProfile} withdrawals={withdrawals} onAddWithdrawal={handleAddNewWithdrawalRequest} />
+                  <WithdrawHub user={correctedProfile} setUser={setUserProfile} withdrawals={withdrawals} onAddWithdrawal={handleAddNewWithdrawalRequest} />
                 )}
                 {activeTab === "rewards" && (
-                  <RewardsStore user={userProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} />
+                  <RewardsStore user={correctedProfile} setUser={setUserProfile} onRewardEarned={handleRewardEarned} />
                 )}
                 {activeTab === "kyc-upload" && (
-                  <KycUploadPage user={userProfile} setUser={setUserProfile} />
+                  <KycUploadPage user={correctedProfile} setUser={setUserProfile} />
                 )}
                 {activeTab === "affiliates" && (
-                  <ReferralsAffiliates user={userProfile} />
+                  <ReferralsAffiliates user={correctedProfile} />
                 )}
               </>
             )}
               {activeTab === "support-ticket" && (
-                <SupportTicket user={userProfile} setUser={setUserProfile} />
+                <SupportTicket user={correctedProfile} setUser={setUserProfile} />
               )}
               {activeTab === "my-profile" && (
-                <MyProfilePage user={userProfile} />
+                <MyProfilePage user={correctedProfile} />
               )}
               {activeTab === "account-settings" && (
-                <AccountSettingsPage user={userProfile} setUser={setUserProfile} simulationCountry={simulationCountry} setSimulationCountry={setSimulationCountry} />
+                <AccountSettingsPage user={correctedProfile} setUser={setUserProfile} simulationCountry={simulationCountry} setSimulationCountry={setSimulationCountry} />
               )}
               {activeTab === "security-settings" && (
-                <SecuritySettingsPage user={userProfile} setUser={setUserProfile} />
+                <SecuritySettingsPage user={correctedProfile} setUser={setUserProfile} />
               )}
               {activeTab === "leaderboard" && (
                 <LeaderboardPodium />
@@ -1309,7 +1482,7 @@ export default function App() {
       <RewardPopup popups={rewardPopups} onDismiss={dismissPopup} />
 
       {/* ═══════ MOBILE BOTTOM TAB BAR ═══════ */}
-      {isDashboardView && userProfile && setActiveTab && (
+      {isDashboardView && userProfile && setActiveTab && activeTab !== "admin-panel" && (
         <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-slate-950/95 backdrop-blur-xl border-t border-white/5 safe-area-bottom">
           <div className="grid grid-cols-5 items-center px-1 pt-1 pb-1.5">
             <button
@@ -1383,7 +1556,6 @@ export default function App() {
         </nav>
       )}
       </div>
-      )}
     </AppRealtimeProvider>
   );
 }

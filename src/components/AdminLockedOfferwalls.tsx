@@ -20,6 +20,8 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
   const [configs, setConfigs] = useState<LockedOfferwallConfig[]>(getLockedOfferwallConfigs);
   const [editConfig, setEditConfig] = useState<{ providerName: string; title: string; subtitle: string; isLocked: boolean; requiredCoins: number; logo: string; watermark: string; promoEnabled: boolean } | null>(null);
   const [addingNew, setAddingNew] = useState(false);
+  const [providerSearch, setProviderSearch] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const refreshConfigs = () => setConfigs(getLockedOfferwallConfigs());
 
@@ -44,10 +46,11 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
       isLocked: true, requiredCoins: 5000,
       logo: "", watermark: "", promoEnabled: true,
     });
+    setProviderSearch(providerName);
     setAddingNew(true);
   };
 
-  const cancelEdit = () => { setEditConfig(null); setAddingNew(false); };
+  const cancelEdit = () => { setEditConfig(null); setAddingNew(false); setProviderSearch(""); setShowSuggestions(false); };
 
   const handleDelete = (providerName: string) => {
     deleteLockedOfferwallConfig(providerName);
@@ -146,11 +149,47 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
               {addingNew ? "New Configuration" : `Edit: ${editConfig.providerName}`}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <div>
+              <div className="relative">
                 <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Provider</label>
-                <select value={editConfig.providerName} onChange={(e) => setEditConfig({ ...editConfig, providerName: e.target.value })} disabled={!addingNew} className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white disabled:opacity-50 focus:outline-none focus:border-cyan-500/20">
-                  {providers.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
-                </select>
+                {addingNew ? (
+                  <>
+                    <input
+                      value={providerSearch}
+                      onChange={(e) => { setProviderSearch(e.target.value); setShowSuggestions(true); if (editConfig) setEditConfig({ ...editConfig, providerName: e.target.value }); }}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      placeholder="Search provider..."
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20"
+                    />
+                    {showSuggestions && (
+                      <div className="absolute z-30 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-white/10 rounded-xl shadow-2xl backdrop-blur-xl">
+                        {providers
+                          .filter((p) => p.name.toLowerCase().includes(providerSearch.toLowerCase()))
+                          .map((p) => {
+                            const selected = editConfig?.providerName === p.name;
+                            return (
+                              <button
+                                key={p.id}
+                                onMouseDown={() => { setEditConfig({ ...editConfig!, providerName: p.name }); setProviderSearch(p.name); setShowSuggestions(false); }}
+                                className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${selected ? "text-cyan-300 bg-cyan-500/10" : "text-white hover:bg-white/5"}`}
+                              >
+                                <div className={`w-6 h-6 rounded-lg ${p.bgLight} border ${p.border} flex items-center justify-center`}>
+                                  <span className={`text-[7px] font-bold bg-gradient-to-br ${p.color} text-transparent bg-clip-text`}>{p.initials}</span>
+                                </div>
+                                <span>{p.name}</span>
+                                {selected && <span className="ml-auto text-[8px] text-cyan-400">Selected</span>}
+                              </button>
+                            );
+                          })}
+                        {providers.filter((p) => p.name.toLowerCase().includes(providerSearch.toLowerCase())).length === 0 && (
+                          <p className="px-3 py-3 text-[10px] text-slate-500 text-center">No providers found</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <input value={editConfig.providerName} disabled className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/50 disabled:opacity-50 focus:outline-none" />
+                )}
               </div>
               <div>
                 <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Title</label>

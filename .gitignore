@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+vpn_config.json
+kyc_data.json

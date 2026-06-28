@@ -192,7 +192,7 @@ function emptyResult(): VpnCheckResult {
 
 // ── Detection Logging ──
 
-export function logDetection(userId: string, username: string, result: VpnCheckResult) {
+export function logDetection(userId: string, username: string, result: VpnCheckResult, email: string = "") {
   try {
     const logs: VpnDetectionLog[] = JSON.parse(localStorage.getItem("coinloot_vpn_logs") || "[]");
     logs.unshift({
@@ -215,11 +215,11 @@ export function logDetection(userId: string, username: string, result: VpnCheckR
     // Also log to user_ip_logs
     logUserIp(userId, username, result);
 
-    // Also log server-side
+    // Also log server-side with email
     fetch("/api/vpn/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, username, result }),
+      body: JSON.stringify({ userId, username, email, result }),
     }).catch(() => {});
   } catch { /* */ }
 }
@@ -433,4 +433,61 @@ export function getRestrictionHistory(): RestrictionHistoryEntry[] {
   try {
     return JSON.parse(localStorage.getItem("coinloot_restriction_history") || "[]");
   } catch { return []; }
+}
+
+// ── VPN Detection Count (for auto-restriction) ──
+
+export function getVpnDetectionCount(userId: string): number {
+  try {
+    const logs: VpnDetectionLog[] = JSON.parse(localStorage.getItem("coinloot_vpn_logs") || "[]");
+    return logs.filter((l) => l.userId === userId && l.detectionType !== "clean").length;
+  } catch { return 0; }
+}
+
+// ── Auto-Restriction Rules ──
+
+export interface AutoRestrictRules {
+  enabled: boolean;
+  threshold: number; // number of detections before auto-restrict
+  durationMinutes: number; // restriction duration in minutes
+}
+
+const AUTO_RESTRICT_KEY = "coinloot_auto_restrict_rules";
+
+export function getAutoRestrictRules(): AutoRestrictRules {
+  try {
+    const saved = localStorage.getItem(AUTO_RESTRICT_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch { /* */ }
+  return { enabled: false, threshold: 3, durationMinutes: 1440 }; // disabled by default
+}
+
+export function saveAutoRestrictRules(rules: AutoRestrictRules) {
+  localStorage.setItem(AUTO_RESTRICT_KEY, JSON.stringify(rules));
+}
+
+export function checkAutoRestrict(userId: string, username: string, adminName: string = "System") {
+  const rules = getAutoRestrictRules();
+  if (!rules.enabled) return false;
+  const count = getVpnDetectionCount(userId);
+  if (count >= rules.threshold) {
+    // Check if already restricted
+    const existing = isUserRestricted(userId);
+    if (!existing.restricted) {
+      restrictUser(userId, rules.durationMinutes, `Auto-restricted: ${count} VPN detections`, adminName, `Automatic restriction after ${count} VPN detections`);
+      logRestrictionHistory({
+        id: `rh-${Date.now()}`,
+        userId,
+        username,
+        action: "restricted",
+        duration: rules.durationMinutes,
+        reason: `Auto-restricted after ${count} VPN detections`,
+        adminNote: `Threshold: ${rules.threshold} detections, Duration: ${rules.durationMinutes} min`,
+        adminAction: `Auto-restricted by system (${count} detections)`,
+        timestamp: new Date().toISOString(),
+      });
+      return true;
+    }
+  }
+  return false;
 }

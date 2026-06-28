@@ -133,9 +133,12 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
 
           if (!relevantKeys.includes(key)) return;
 
-          // Reload the changed setting
-          const newState = await loadAllState();
-          setState(newState);
+          try {
+            const newState = await loadAllState();
+            setState(newState);
+          } catch (err) {
+            console.warn("[Realtime] Failed to reload state:", err);
+          }
         }
       )
       .subscribe((status: string) => {
@@ -147,6 +150,34 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
     return () => {
       sb.removeChannel(channel);
     };
+  }, []);
+
+  // Listen for homepage-sections-changed custom event (fallback for local updates)
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail) {
+        setState(prev => ({ ...prev, homepageSections: custom.detail }));
+        return;
+      }
+      try {
+        const sections = await getHomepageSections();
+        setState(prev => ({ ...prev, homepageSections: sections }));
+      } catch {}
+    };
+    window.addEventListener("homepage-sections-changed", handler);
+    return () => window.removeEventListener("homepage-sections-changed", handler);
+  }, []);
+
+  // Periodic refresh as safety net
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const sections = await getHomepageSections();
+        setState(prev => ({ ...prev, homepageSections: sections }));
+      } catch {}
+    }, 15_000);
+    return () => clearInterval(interval);
   }, []);
 
   // Subscribe to real-time system_notifications changes

@@ -1,5 +1,7 @@
 import { User, ShieldCheck, Calendar, MapPin, Award, Coins, DollarSign, Users, CheckCircle, Fingerprint, Globe } from "lucide-react";
 import { UserProfile } from "../types";
+import LevelProgress from "./LevelProgress";
+import { calcLevel } from "../utils/levelSystem";
 
 interface MyProfilePageProps {
   user: UserProfile;
@@ -19,7 +21,7 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
   ];
 
   const statsGrid = [
-    { label: "Current Level", value: `LVL ${user.level}`, sub: `${user.xp} total XP`, icon: Award, color: "text-purple-400", bg: "from-purple-500/10 to-pink-500/10", border: "border-purple-500/20" },
+    { label: "Current Level", value: `LVL ${calcLevel(user.balance_coins)}`, sub: `${user.xp} total XP`, icon: Award, color: "text-purple-400", bg: "from-purple-500/10 to-pink-500/10", border: "border-purple-500/20" },
     { label: "Total Coins Earned", value: `${user.total_earned_coins.toLocaleString()}c`, sub: `≈ $${(user.total_earned_coins / 1000).toFixed(2)} USD`, icon: Coins, color: "text-cyan-400", bg: "from-cyan-500/10 to-blue-500/10", border: "border-cyan-500/20" },
     { label: "Total Withdrawals", value: `$${user.total_withdrawn_usd.toFixed(2)}`, sub: `${user.total_withdrawn_usd > 0 ? "Paid out" : "No withdrawals yet"}`, icon: DollarSign, color: "text-emerald-400", bg: "from-emerald-500/10 to-teal-500/10", border: "border-emerald-500/20" },
     { label: "Referral Count", value: `${user.referrals_count}`, sub: `${user.referrals_count === 1 ? "1 recruit" : `${user.referrals_count} recruits`}`, icon: Users, color: "text-amber-400", bg: "from-amber-500/10 to-orange-500/10", border: "border-amber-500/20" },
@@ -79,9 +81,12 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
         </div>
       </div>
 
+      {/* Level Progress */}
+      <LevelProgress user={user} />
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-        {statsGrid.map((stat, i) => {
+        {statsGrid.slice(1).map((stat, i) => {
           const Icon = stat.icon;
           return (
             <div key={i} className={`bg-gradient-to-br ${stat.bg} border ${stat.border} rounded-2xl p-5 relative overflow-hidden group hover:border-opacity-50 transition-all`}>
