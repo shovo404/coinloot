@@ -28,7 +28,6 @@ export async function signUp(email: string, password: string, username: string) 
       total_earned_coins: 0,
       kyc_status: "NOT_STARTED",
       is_admin: false,
-      role: 'user',
       vpn_detected: false,
     });
     if (profileError) throw profileError;
