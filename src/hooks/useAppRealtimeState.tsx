@@ -7,6 +7,7 @@ import {
   getHomepageSections, getDeveloperMode, getMaintenanceMode,
   getGlobalPromoNotification, getLockRules, getRewardsConfig,
   getSystemNotifications, getOffers, getPromoCodes,
+  getActiveAnnouncements,
   VpnSettings, getVpnSettingsDb,
   SocialBountyConfig, WeeklyChallengeConfig,
   defaultSocialBounty, defaultWeeklyChallenge,
@@ -25,6 +26,7 @@ export interface AppRealtimeState {
   weeklyChallenge: WeeklyChallengeConfig;
   vpnSettings: VpnSettings;
   systemNotifications: any[];
+  announcements: any[];
   offers: any[];
   promoCodes: any[];
   loading: boolean;
@@ -41,6 +43,7 @@ const defaultState: AppRealtimeState = {
   weeklyChallenge: defaultWeeklyChallenge(),
   vpnSettings: { vpnDetection: true, vpnWarning: true, vpnBlock: true, withdrawalBlock: true, restrictDuration: 30 },
   systemNotifications: [],
+  announcements: [],
   offers: [],
   promoCodes: [],
   loading: true,
@@ -63,7 +66,7 @@ export function useAppRealtimeState() {
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 async function loadAllState(): Promise<AppRealtimeState> {
-  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications, offers, promoCodes] =
+  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications, announcements, offers, promoCodes] =
     await Promise.all([
       getHomepageSections(),
       getDeveloperMode(),
@@ -73,6 +76,7 @@ async function loadAllState(): Promise<AppRealtimeState> {
       getRewardsConfig(),
       getVpnSettingsDb(),
       getSystemNotifications().catch(() => []),
+      getActiveAnnouncements().catch(() => []),
       getOffers(),
       getPromoCodes(),
     ]);
@@ -88,6 +92,7 @@ async function loadAllState(): Promise<AppRealtimeState> {
     weeklyChallenge: rewardsConfig.weeklyChallenge,
     vpnSettings,
     systemNotifications,
+    announcements,
     offers,
     promoCodes,
     loading: false,
@@ -169,12 +174,34 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
     return () => window.removeEventListener("homepage-sections-changed", handler);
   }, []);
 
+  // Listen for announcements-changed custom event (same-tab sync)
+  useEffect(() => {
+    const handler = async () => {
+      const announcements = await getActiveAnnouncements().catch(() => []);
+      setState(prev => ({ ...prev, announcements }));
+    };
+    window.addEventListener("announcements-changed", handler);
+    return () => window.removeEventListener("announcements-changed", handler);
+  }, []);
+
+  // Listen for promo-codes-changed custom event (same-tab sync)
+  useEffect(() => {
+    const handler = async () => {
+      const promoCodes = await getPromoCodes();
+      setState(prev => ({ ...prev, promoCodes }));
+    };
+    window.addEventListener("promo-codes-changed", handler);
+    return () => window.removeEventListener("promo-codes-changed", handler);
+  }, []);
+
   // Periodic refresh as safety net
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
         const sections = await getHomepageSections();
-        setState(prev => ({ ...prev, homepageSections: sections }));
+        const announcements = await getActiveAnnouncements().catch(() => []);
+        const promoCodes = await getPromoCodes();
+        setState(prev => ({ ...prev, homepageSections: sections, announcements, promoCodes }));
       } catch {}
     }, 15_000);
     return () => clearInterval(interval);
@@ -191,6 +218,26 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
         async () => {
           const notifs = await getSystemNotifications().catch(() => []);
           setState(prev => ({ ...prev, systemNotifications: notifs }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, []);
+
+  // Subscribe to real-time announcements changes
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    const channel = sb.channel("announcements-realtime")
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "announcements" },
+        async () => {
+          const announcements = await getActiveAnnouncements().catch(() => []);
+          setState(prev => ({ ...prev, announcements }));
         }
       )
       .subscribe();

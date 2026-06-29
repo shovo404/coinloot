@@ -4,6 +4,7 @@ import {
   HelpCircle, Zap, ShieldCheck, Cpu, ArrowUpRight, Lock, AlertTriangle, Coins,
   Trophy, Star, Gift, Unlock, Info, Clock,
 } from "lucide-react";
+import Loader from "./Loader";
 import { UserProfile, Offer } from "../types";
 import { isUserRestricted } from "../utils/vpnDetector";
 import { isDeveloperMode } from "./DeveloperModeBanner";
@@ -208,7 +209,7 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
             <span className="px-2.5 py-1 text-[10px] uppercase font-mono bg-cyan-400/15 border border-cyan-400/30 text-cyan-300 font-semibold rounded-full">
               Smart Offer Matrix
             </span>
-            {loadingAi && <span className="text-xs font-mono text-cyan-400 animate-pulse">Syncing recommendations...</span>}
+            {loadingAi && <Loader size="xs" text="Syncing recommendations" />}
           </div>
           <h1 className="font-sans font-bold text-2.5xl lg:text-3.5xl text-white tracking-tight">
             The Galactic <span className="bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 bg-clip-text text-transparent">Offerwall Hub</span>
@@ -474,7 +475,7 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
                 >
                   {submittingTestEarn ? (
                     <>
-                      <Zap className="w-3.5 h-3.5 text-orange-400 animate-bounce" />
+                      <Loader size="xs" />
                       <span>Verifying...</span>
                     </>
                   ) : (

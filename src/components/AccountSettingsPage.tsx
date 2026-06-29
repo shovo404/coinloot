@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Save, User, Mail, Lock, Bell, Palette, Globe, Camera, Trash2, Upload, CheckCircle, AlertCircle, Eye, EyeOff, MapPin } from "lucide-react";
+import Loader from "./Loader";
 import { UserProfile } from "../types";
 import { applyTheme, applyLanguage, loadPreferences, savePreferences, listenForSystemTheme } from "../utils/themeUtils";
 
@@ -425,7 +426,7 @@ export default function AccountSettingsPage({ user, setUser, simulationCountry, 
         className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-sm tracking-wide shadow-lg shadow-cyan-500/10 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
       >
         {saving ? (
-          <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</>
+          <><Loader size="xs" /> Saving...</>
         ) : (
           <><Save className="w-4 h-4" /> Save All Changes</>
         )}

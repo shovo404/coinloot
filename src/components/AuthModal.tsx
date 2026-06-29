@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, LogIn, UserPlus, CheckCircle } from "lucide-react";
+import Loader from "./Loader";
 import { UserProfile } from "../types";
 import { getSupabaseClient } from "../lib/supabase";
 import { signUp, signIn, getProfile, updateProfile } from "../lib/supabaseService";
@@ -477,7 +478,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
           >
             {loading ? (
               <span className="flex items-center gap-2">
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <Loader size="xs" />
                 {activeTab === "signin" ? "Authenticating..." : "Creating account..."}
               </span>
             ) : (

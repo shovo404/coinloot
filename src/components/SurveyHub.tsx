@@ -353,7 +353,7 @@ export default function SurveyHub({ user, setUser, onRewardEarned, simulationCou
                 >
                   {completingState ? (
                     <>
-                      <Zap className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                      <Loader size="xs" />
                       <span>Completing...</span>
                     </>
                   ) : (

@@ -10,7 +10,7 @@ import {
   checkLevelRequirement
 } from "../utils/rewardsConfig";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
-import { savePromoCodes as savePromoCodesDb } from "../lib/adminDb";
+import { validatePromoCode } from "../lib/supabaseService";
 
 interface RewardsStoreProps {
   user: UserProfile;
@@ -85,7 +85,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
   };
 
   // Submit Promo Code
-  const handleApplyPromoCode = (e: React.FormEvent) => {
+  const handleApplyPromoCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isDeveloperMode()) { setPromoError("Promo codes are temporarily disabled."); return; }
     setPromoError("");
@@ -94,87 +94,18 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
     const code = promoCodeInput.trim().toUpperCase();
     if (!code) return;
 
-    // Load admin-created promo codes from context (synced with Supabase)
-    const adminCodes: any[] = state.promoCodes;
-
-    // Check hardcoded codes as fallback
-    const hardcodedCodes: Record<string, number> = { "NITRO2026": 250, "COINLOOT": 250, "BONUS500": 500 };
-
-    if (adminCodes.length > 0) {
-      const match = adminCodes.find((c) => c.code === code && c.active);
-      if (!match) {
-        setPromoError("Invalid or expired promo code.");
+    try {
+      const result = await validatePromoCode(code, user.id);
+      if (!result.success) {
+        setPromoError(result.error || "Invalid promo code.");
         return;
       }
-      if (new Date(match.expiresAt) < new Date()) {
-        setPromoError("This promo code has expired.");
-        return;
-      }
-      if (match.currentUses >= match.maxUses) {
-        setPromoError("This promo code has reached its maximum usage limit.");
-        return;
-      }
-      // Check if user already claimed this code
-      const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
-      if (claimed.includes(code)) {
-        setPromoError("You have already redeemed this promo code.");
-        return;
-      }
-      const payout = match.coins;
-      claimed.push(code);
-      localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
-      // Update usage count
-      match.currentUses += 1;
-      localStorage.setItem("coinloot_promo_codes", JSON.stringify(adminCodes));
-      savePromoCodesDb(adminCodes).catch(err => console.warn("[PromoCodes] DB sync failed:", err));
       playCoinSound();
-      onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
-      setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
+      setUser({ ...user, balance_coins: user.balance_coins + result.coins!, total_earned_coins: user.total_earned_coins + result.coins!, balance_usd: (user.balance_coins + result.coins!) / 1000 });
+      setPromoSuccess(`Success! Promo code verified: +${result.coins} coins!`);
       setPromoCodeInput("");
-    } else if (hardcodedCodes[code] !== undefined) {
-      const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
-      if (claimed.includes(code)) {
-        setPromoError("This voucher protocol has already been used on your terminal device.");
-        return;
-      }
-      const payout = hardcodedCodes[code];
-      claimed.push(code);
-      localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
-      playCoinSound();
-      onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
-      setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
-      setPromoCodeInput("");
-    } else {
-      // Check global notification promo code
-      const globalCode = globalPromo.promoCode || "";
-      const globalEnabled = globalPromo.promoEnabled || false;
-      const globalCoins = globalPromo.promoCoins || 0;
-      const globalDurationSec = globalPromo.promoDuration || 0;
-      if (globalEnabled && globalCode && code === globalCode.toUpperCase() && globalCoins > 0) {
-        const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
-        if (claimed.includes(code)) {
-          setPromoError("You have already redeemed this promo code.");
-          return;
-        }
-        // Check expiry
-        const startRaw = localStorage.getItem("coinloot_global_notif_promo_start");
-        if (startRaw && globalDurationSec > 0) {
-          const ms = globalDurationSec * 1000;
-          if (Date.now() >= parseInt(startRaw) + ms) {
-            setPromoError("This promo code has expired.");
-            return;
-          }
-        }
-        const payout = globalCoins;
-        claimed.push(code);
-        localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
-        playCoinSound();
-        onRewardEarned(payout, "Promo Code", `Promo code "${code}" redeemed! +${payout.toLocaleString()} coins credited.`);
-        setPromoSuccess(`Success! Promo code verified: +${payout} coins!`);
-        setPromoCodeInput("");
-      } else {
-        setPromoError("Invalid code. Enter a valid promo code.");
-      }
+    } catch {
+      setPromoError("Failed to validate promo code. Please try again.");
     }
   };
 

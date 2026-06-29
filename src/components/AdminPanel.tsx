@@ -5,7 +5,7 @@ import {
   Activity, Globe, Lock, Unlock, Upload, Bell, Gift, Link2, Award, Flag, FileText,
   Crown, Flame, ClipboardCheck, ShieldCheck,
   UserCheck, UserX, Plus, Minus, Trash2, Edit, Send, Wallet, Zap, Clock, Server,
-  Loader2, AlertTriangle, RefreshCw, Wifi, Eye, EyeOff, Copy, Ban, X,
+  AlertTriangle, RefreshCw, Wifi, Eye, EyeOff, Copy, Ban, X,
   ChevronDown, ChevronUp, Filter, Download, Shield, Key, Percent,
   Calendar, UserPlus, ExternalLink, MoreHorizontal, HardDrive, Signal, Circle,
   Sun, Moon, List, LayoutGrid, ArrowUpRight, ArrowDownRight, Gauge, Mail, History,
@@ -27,6 +27,7 @@ import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
 import { updateWithdrawalStatus } from "../lib/supabaseService";
 import * as AdminDb from "../lib/adminDb";
+import Loader from "./Loader";
 import { 
   getSocialBountyConfig, saveSocialBountyConfig, 
   getWeeklyChallengeConfig, saveWeeklyChallengeConfig, 
@@ -404,7 +405,7 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
     }
 
 function StatCard({ label, value, icon: Icon, color, trend, loading }: { label: string; value: string; icon: any; color: string; trend?: { up: boolean; pct: string }; loading?: boolean }) {
-  if (loading) return <div className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 animate-pulse"><div className="w-9 h-9 rounded-xl bg-slate-800/60 mb-3" /><div className="h-6 w-20 bg-slate-800/60 rounded mb-2" /><div className="h-3 w-16 bg-slate-800/40 rounded" /></div>;
+  if (loading) return <div className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 flex items-center justify-center min-h-[120px]"><Loader size="sm" /></div>;
   return (
     <div className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 hover:border-cyan-500/20 transition-all group">
       <div className="flex items-start justify-between mb-3">
@@ -419,7 +420,7 @@ function StatCard({ label, value, icon: Icon, color, trend, loading }: { label: 
   );
 }
 
-function LoadingRow() { return <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 animate-pulse flex items-center gap-4"><div className="w-9 h-9 rounded-xl bg-slate-800/60 shrink-0" /><div className="flex-1 space-y-2"><div className="h-3 w-32 bg-slate-800/60 rounded" /><div className="h-2 w-48 bg-slate-800/40 rounded" /></div><div className="h-6 w-16 bg-slate-800/40 rounded" /></div>; }
+function LoadingRow() { return <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 flex items-center justify-center min-h-[60px]"><Loader size="sm" /></div>; }
 
 const AdminBackBtn = ({ onClick }: { onClick: () => void }) => (
   <button onClick={onClick} className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-white font-mono transition-colors cursor-pointer mb-3">
@@ -479,6 +480,13 @@ function RewardsChallengesManagement() {
             </div>
             <h3 className="text-sm font-bold text-white mb-1">Weekly Elite Challenge Settings</h3>
             <p className="text-[10px] text-slate-400 font-mono">Enable/disable, set reward coins, bonus coins, level requirements, and weekly reset rules.</p>
+          </button>
+          <button onClick={() => setSubSection("campaigns")} className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 hover:border-emerald-500/20 transition-all text-left group cursor-pointer">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+              <Flag className="w-5 h-5 text-white" />
+            </div>
+            <h3 className="text-sm font-bold text-white mb-1">Campaign Management</h3>
+            <p className="text-[10px] text-slate-400 font-mono">Create and manage social bounty campaigns with multiple tasks and screenshot submissions.</p>
           </button>
         </div>
       </div>
@@ -541,6 +549,11 @@ function RewardsChallengesManagement() {
         </div>
       </div>
     );
+  }
+
+  // ── Campaign Management ──
+  if (subSection === "campaigns") {
+    return <CampaignManagementPanel onBack={() => setSubSection("overview")} />;
   }
 
   // ── Weekly Elite Challenge Settings ──
@@ -609,6 +622,367 @@ function RewardsChallengesManagement() {
   );
 }
 
+// ── Campaign Management Panel ──
+function CampaignManagementPanel({ onBack }: { onBack: () => void }) {
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [subView, setSubView] = useState<"list" | "edit" | "tasks" | "submissions">("list");
+  const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [editForm, setEditForm] = useState<any>({ title: "", description: "", icon: "🎯", reward_coins: 0, completion_mode: "all", max_screenshots: 5, required_level: 1, is_active: true });
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const loadCampaigns = useCallback(async () => {
+    setLoading(true);
+    const data = await AdminDb.getCampaigns();
+    setCampaigns(data);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
+
+  const handleEdit = (c: any) => {
+    setSelectedCampaign(c);
+    setEditForm({ title: c.title, description: c.description || "", icon: c.icon || "🎯", reward_coins: c.reward_coins, completion_mode: c.completion_mode || "all", max_screenshots: c.max_screenshots || 5, required_level: c.required_level || 1, is_active: c.is_active !== false });
+    setSubView("edit");
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (selectedCampaign) {
+        await AdminDb.updateCampaign(selectedCampaign.id, editForm);
+      } else {
+        await AdminDb.createCampaign(editForm);
+      }
+      await loadCampaigns();
+      setSubView("list");
+    } catch (e) { console.error(e); alert("Failed to save campaign"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this campaign and all its tasks?")) return;
+    await AdminDb.deleteCampaign(id);
+    await loadCampaigns();
+  };
+
+  const loadTasks = async (c: any) => {
+    setSelectedCampaign(c);
+    const data = await AdminDb.getCampaignTasks(c.id);
+    setTasks(data);
+    setSubView("tasks");
+  };
+
+  const loadSubmissions = async (c: any) => {
+    setSelectedCampaign(c);
+    const data = await AdminDb.getCampaignSubmissions(c.id);
+    setSubmissions(data);
+    setSubView("submissions");
+  };
+
+  // ── List View ──
+  if (subView === "list") {
+    return (
+      <div className="p-4 lg:p-6 space-y-4 max-w-5xl">
+        <AdminBackBtn onClick={onBack} />
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl lg:text-2xl font-bold text-white">Social Bounty Campaigns</h1>
+          <button onClick={() => { setSelectedCampaign(null); setEditForm({ title: "", description: "", icon: "🎯", reward_coins: 0, completion_mode: "all", max_screenshots: 5, required_level: 1, is_active: true }); setSubView("edit"); }} className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer flex items-center gap-1">
+            <Plus className="w-3 h-3" /> New Campaign
+          </button>
+        </div>
+        {loading ? <Loader /> : campaigns.length === 0 ? (
+          <div className="bg-slate-950/40 p-8 rounded-3xl border border-white/5 text-center">
+            <Flag className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <p className="text-slate-400 text-sm">No campaigns yet. Create your first campaign!</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {campaigns.map((c) => (
+              <div key={c.id} className="bg-slate-950/40 p-4 rounded-3xl border border-white/5 hover:border-white/10 transition-all">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-2xl shrink-0">{c.icon || "🎯"}</span>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-white truncate">{c.title}</h3>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">{c.description || "No description"}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${c.is_active ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700/50 text-slate-400"}`}>{c.is_active ? "Active" : "Inactive"}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-[9px] text-slate-400 font-mono">
+                  <span>🎯 {c.reward_coins.toLocaleString()} coins</span>
+                  <span>📋 Mode: {c.completion_mode === "all" ? "All tasks" : "Any task"}</span>
+                  <span>📸 Max {c.max_screenshots || 5} screenshots</span>
+                  <span>⭐ Level {c.required_level || 1}+</span>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => handleEdit(c)} className="px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 text-[9px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer flex items-center gap-1"><Edit className="w-3 h-3" /> Edit</button>
+                  <button onClick={() => loadTasks(c)} className="px-3 py-1.5 rounded-xl bg-violet-500/10 text-violet-400 text-[9px] font-bold hover:bg-violet-500/20 transition-all cursor-pointer flex items-center gap-1"><List className="w-3 h-3" /> Tasks</button>
+                  <button onClick={() => loadSubmissions(c)} className="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-400 text-[9px] font-bold hover:bg-amber-500/20 transition-all cursor-pointer flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Submissions</button>
+                  <button onClick={() => handleDelete(c.id)} className="px-3 py-1.5 rounded-xl bg-red-500/10 text-red-400 text-[9px] font-bold hover:bg-red-500/20 transition-all cursor-pointer flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Edit / Create View ──
+  if (subView === "edit") {
+    return (
+      <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+        <AdminBackBtn onClick={() => setSubView("list")} />
+        <h1 className="text-xl lg:text-2xl font-bold text-white">{selectedCampaign ? "Edit Campaign" : "New Campaign"}</h1>
+        <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+          <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Title</label><input value={editForm.title} onChange={(e) => setEditForm({...editForm, title: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="e.g. Facebook Engagement Campaign" /></div>
+          <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Description</label><textarea value={editForm.description} onChange={(e) => setEditForm({...editForm, description: e.target.value})} rows={2} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white resize-none" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Icon (emoji)</label><input value={editForm.icon} onChange={(e) => setEditForm({...editForm, icon: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Reward Coins</label><input type="number" value={editForm.reward_coins} onChange={(e) => setEditForm({...editForm, reward_coins: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Completion Mode</label>
+              <select value={editForm.completion_mode} onChange={(e) => setEditForm({...editForm, completion_mode: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white">
+                <option value="all">Complete ALL tasks</option>
+                <option value="any">Complete ANY task</option>
+              </select>
+            </div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Max Screenshots</label><input type="number" value={editForm.max_screenshots} onChange={(e) => setEditForm({...editForm, max_screenshots: parseInt(e.target.value) || 1})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" min={1} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Required Level</label><input type="number" value={editForm.required_level} onChange={(e) => setEditForm({...editForm, required_level: parseInt(e.target.value) || 1})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" min={1} /></div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400 font-mono">Active</span>
+              <button onClick={() => setEditForm({...editForm, is_active: !editForm.is_active})} className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${editForm.is_active ? "bg-emerald-500" : "bg-slate-700"}`}>
+                <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: editForm.is_active ? "calc(100% - 18px)" : "2px" }} />
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer disabled:opacity-50">
+              {saving ? "Saving..." : selectedCampaign ? "Update Campaign" : "Create Campaign"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Tasks View ──
+  if (subView === "tasks") {
+    return <CampaignTasksPanel campaign={selectedCampaign} tasks={tasks} onBack={() => setSubView("list")} onRefresh={async () => { if (selectedCampaign) { const d = await AdminDb.getCampaignTasks(selectedCampaign.id); setTasks(d); }}} />;
+  }
+
+  // ── Submissions View ──
+  if (subView === "submissions") {
+    return <CampaignSubmissionsPanel campaign={selectedCampaign} submissions={submissions} onBack={() => setSubView("list")} onRefresh={async () => { if (selectedCampaign) { const d = await AdminDb.getCampaignSubmissions(selectedCampaign.id); setSubmissions(d); }}} />;
+  }
+
+  return null;
+}
+
+// ── Campaign Tasks Panel ──
+function CampaignTasksPanel({ campaign, tasks, onBack, onRefresh }: { campaign: any; tasks: any[]; onBack: () => void; onRefresh: () => Promise<void> }) {
+  const [taskForm, setTaskForm] = useState<any>({ task_title: "", task_description: "", reward_coins: 0, sort_order: tasks.length });
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!taskForm.task_title.trim()) return;
+    setSaving(true);
+    try {
+      if (editingTask) {
+        await AdminDb.updateCampaignTask(editingTask.id, taskForm);
+      } else {
+        await AdminDb.createCampaignTask({ ...taskForm, campaign_id: campaign.id });
+      }
+      setTaskForm({ task_title: "", task_description: "", reward_coins: 0, sort_order: tasks.length });
+      setEditingTask(null);
+      setShowForm(false);
+      await onRefresh();
+    } catch (e) { console.error(e); alert("Failed to save task"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this task?")) return;
+    await AdminDb.deleteCampaignTask(id);
+    await onRefresh();
+  };
+
+  const totalReward = tasks.reduce((s, t) => s + (t.reward_coins || 0), 0);
+
+  return (
+    <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+      <AdminBackBtn onClick={onBack} />
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-bold text-white">{campaign?.icon} {campaign?.title}</h1>
+          <p className="text-[10px] text-slate-400 font-mono">{tasks.length} tasks · Total: {totalReward.toLocaleString()} coins</p>
+        </div>
+        <button onClick={() => { setEditingTask(null); setTaskForm({ task_title: "", task_description: "", reward_coins: 0, sort_order: tasks.length }); setShowForm(true); }} className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Add Task
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-slate-950/40 p-4 rounded-3xl border border-cyan-500/20 space-y-3">
+          <h3 className="text-xs font-bold text-white">{editingTask ? "Edit Task" : "New Task"}</h3>
+          <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Task Title</label><input value={taskForm.task_title} onChange={(e) => setTaskForm({...taskForm, task_title: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" placeholder="e.g. Like Facebook Page" /></div>
+          <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Description (optional)</label><input value={taskForm.task_description} onChange={(e) => setTaskForm({...taskForm, task_description: e.target.value})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Reward Coins</label><input type="number" value={taskForm.reward_coins} onChange={(e) => setTaskForm({...taskForm, reward_coins: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+            <div><label className="text-[9px] text-slate-500 uppercase block mb-1">Sort Order</label><input type="number" value={taskForm.sort_order} onChange={(e) => setTaskForm({...taskForm, sort_order: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs font-mono text-white" /></div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded-xl bg-cyan-500 text-white text-[9px] font-bold hover:bg-cyan-600 transition-all cursor-pointer disabled:opacity-50">{saving ? "Saving..." : "Save Task"}</button>
+            <button onClick={() => { setShowForm(false); setEditingTask(null); }} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-[9px] font-bold hover:bg-slate-700 transition-all cursor-pointer">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {tasks.length === 0 ? (
+        <div className="bg-slate-950/40 p-8 rounded-3xl border border-white/5 text-center">
+          <p className="text-slate-400 text-sm">No tasks yet. Add tasks to this campaign.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {tasks.map((t, i) => (
+            <div key={t.id} className="bg-slate-950/40 p-3 rounded-2xl border border-white/5 flex items-center gap-3">
+              <span className="text-[9px] text-slate-500 font-mono w-5 shrink-0">{i + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white truncate">{t.task_title}</p>
+                {t.task_description && <p className="text-[9px] text-slate-400 truncate">{t.task_description}</p>}
+              </div>
+              <span className="text-[9px] text-emerald-400 font-bold shrink-0">+{t.reward_coins} coins</span>
+              <button onClick={() => { setEditingTask(t); setTaskForm({ task_title: t.task_title, task_description: t.task_description || "", reward_coins: t.reward_coins, sort_order: t.sort_order }); setShowForm(true); }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-all cursor-pointer"><Edit className="w-3 h-3" /></button>
+              <button onClick={() => handleDelete(t.id)} className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Campaign Submissions Panel ──
+function CampaignSubmissionsPanel({ campaign, submissions, onBack, onRefresh }: { campaign: any; submissions: any[]; onBack: () => void; onRefresh: () => Promise<void> }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+
+  const handleApprove = async (id: string) => {
+    setReviewing(true);
+    try {
+      const sb = getSupabaseClient();
+      if (!sb) return;
+      const admin = await sb.auth.getUser();
+      await AdminDb.approveCampaignSubmission(id, admin.data.user?.id || "");
+      await onRefresh();
+      alert("Submission approved! Coins rewarded.");
+    } catch (e) { console.error(e); alert("Failed to approve"); }
+    setReviewing(false);
+  };
+
+  const handleReject = async (id: string) => {
+    const notes = prompt("Rejection reason (optional):");
+    setReviewing(true);
+    try {
+      const sb = getSupabaseClient();
+      if (!sb) return;
+      const admin = await sb.auth.getUser();
+      await AdminDb.rejectCampaignSubmission(id, admin.data.user?.id || "", notes || undefined);
+      await onRefresh();
+      alert("Submission rejected.");
+    } catch (e) { console.error(e); alert("Failed to reject"); }
+    setReviewing(false);
+  };
+
+  const pendingCount = submissions.filter(s => s.status === "pending").length;
+
+  return (
+    <div className="p-4 lg:p-6 space-y-4 max-w-5xl">
+      <AdminBackBtn onClick={onBack} />
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-bold text-white">{campaign?.icon} {campaign?.title} — Submissions</h1>
+          <p className="text-[10px] text-slate-400 font-mono">{submissions.length} total · {pendingCount} pending review</p>
+        </div>
+      </div>
+
+      {submissions.length === 0 ? (
+        <div className="bg-slate-950/40 p-8 rounded-3xl border border-white/5 text-center">
+          <ClipboardCheck className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">No submissions yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {submissions.map((s) => (
+            <div key={s.id} className="bg-slate-950/40 p-4 rounded-3xl border border-white/5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-[9px] font-bold text-white">{s.profiles?.username?.[0]?.toUpperCase() || "?"}</div>
+                  <div>
+                    <p className="text-xs font-bold text-white">{s.profiles?.username || "Unknown"}</p>
+                    <p className="text-[9px] text-slate-400 font-mono">{new Date(s.created_at).toLocaleDateString()} {new Date(s.created_at).toLocaleTimeString()}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${s.status === "approved" ? "bg-emerald-500/10 text-emerald-400" : s.status === "rejected" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"}`}>
+                    {s.status.toUpperCase()}
+                  </span>
+                  <span className="text-[9px] text-emerald-400 font-bold">+{s.total_reward} coins</span>
+                </div>
+              </div>
+
+              {s.admin_notes && (
+                <div className="mt-2 p-2 rounded-xl bg-slate-900/50 border border-white/5">
+                  <p className="text-[9px] text-slate-400 font-mono">Admin notes: {s.admin_notes}</p>
+                </div>
+              )}
+
+              {s.campaign_submission_screenshots?.length > 0 && (
+                <div className="mt-2">
+                  <button onClick={() => setExpanded(expanded === s.id ? null : s.id)} className="text-[9px] text-cyan-400 hover:text-cyan-300 transition-all cursor-pointer">
+                    {expanded === s.id ? "Hide screenshots" : `View ${s.campaign_submission_screenshots.length} screenshot(s)`}
+                  </button>
+                  {expanded === s.id && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-2">
+                      {s.campaign_submission_screenshots.map((ss: any) => (
+                        <a key={ss.id} href={ss.screenshot_url} target="_blank" rel="noopener noreferrer" className="block aspect-video bg-slate-900 rounded-xl overflow-hidden border border-white/5 hover:border-cyan-500/20 transition-all">
+                          <img src={ss.screenshot_url} alt="Screenshot" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = "https://placehold.co/400x225/1e293b/475569?text=No+Preview"; }} />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {s.status === "pending" && (
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => handleApprove(s.id)} disabled={reviewing} className="px-4 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Approve
+                  </button>
+                  <button onClick={() => handleReject(s.id)} disabled={reviewing} className="px-4 py-1.5 rounded-xl bg-red-500/10 text-red-400 text-[9px] font-bold hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                    <XCircle className="w-3 h-3" /> Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const DB_TABLES = ["profiles", "withdrawals", "withdrawal_methods", "offerwall_providers", "offerwalls", "promo_codes", "support_tickets", "kyc_records", "site_settings", "system_notifications", "notifications", "earnings_history", "live_earnings"];
 function DataBrowserCard() {
   const [selectedTable, setSelectedTable] = useState("profiles");
@@ -643,7 +1017,7 @@ function DataBrowserCard() {
           {DB_TABLES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <span className="text-[9px] text-slate-500 font-mono">
-          {loadingTable ? "Loading..." : dbError ? "Error" : `${tableData?.length || 0} rows`}
+          {loadingTable ? <Loader size="xs" /> : dbError ? "Error" : `${tableData?.length || 0} rows`}
         </span>
         {dbError && <span className="text-[9px] text-rose-400 font-mono">{dbError}</span>}
       </div>
@@ -672,7 +1046,7 @@ function DataBrowserCard() {
         ) : tableData && tableData.length === 0 ? (
           <p className="text-center text-slate-500 py-4 text-[10px]">No data in this table.</p>
         ) : loadingTable ? (
-          <p className="text-center text-slate-500 py-4 text-[10px]">Loading...</p>
+          <div className="flex items-center justify-center py-4"><Loader size="sm" /></div>
         ) : null}
       </div>
     </div>
@@ -728,7 +1102,17 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   }, [activeSection, loadServerRecords]);
 
   // ── Homepage Sections State ──
-  const [homepageSections, setHomepageSections] = useState({ featured: true, hot: true, surveys: true, offerwalls: true });
+  const [homepageSections, setHomepageSections] = useState<AdminDb.HomepageSections>({
+    featured: true, hot: true, surveys: true, offerwalls: true,
+    announcements: true, promo_cards: true, rewards: true, challenges: true,
+  });
+
+  // Announcements
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [showAddAnnouncement, setShowAddAnnouncement] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<any>(null);
+  const [announcementTitle, setAnnouncementTitle] = useState("");
+  const [announcementMessage, setAnnouncementMessage] = useState("");
 
   // Load homepage sections from DB, fallback to localStorage
   const loadHomepageSections = async () => {
@@ -754,6 +1138,32 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   useEffect(() => {
     if (activeSection === "homepage") {
       loadHomepageSections();
+    }
+  }, [activeSection]);
+
+  // Load announcements from DB
+  const loadAnnouncements = async () => {
+    try {
+      const data = await AdminDb.getAdminAnnouncements();
+      setAnnouncements(data);
+    } catch {}
+  };
+
+  // Load promo codes from DB and merge with localStorage state
+  const loadPromoCodesFromDb = async () => {
+    try {
+      const dbCodes = await AdminDb.getPromoCodes();
+      if (dbCodes && dbCodes.length > 0) {
+        setPromoCodes(dbCodes);
+        localStorage.setItem("coinloot_promo_codes", JSON.stringify(dbCodes));
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (activeSection === "announcements-promos") {
+      loadAnnouncements();
+      loadPromoCodesFromDb();
     }
   }, [activeSection]);
 
@@ -828,6 +1238,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   // ── Promo Codes State ──
   const [newCode, setNewCode] = useState({ code: "", coins: 100, maxUses: 100 });
+  const [promoFormCode, setPromoFormCode] = useState({ code: "", coins: 500, maxUses: 100, expirationMode: "relative" as "relative" | "exact", expDays: 30, expHours: 0, expMinutes: 0, expSeconds: 0, exactExpiresAt: "" });
 
   // ── Settings State ──
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -1266,7 +1677,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [editingOfferTitle, setEditingOfferTitle] = useState("");
   const [showAddOffer, setShowAddOffer] = useState(false);
-  const [newOffer, setNewOffer] = useState({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false });
+  const [newOffer, setNewOffer] = useState({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false, imageUrl: "" });
   const [editingOfferExt, setEditingOfferExt] = useState<string | null>(null);
   const [editOfferFull, setEditOfferFull] = useState<any>(null);
 
@@ -1354,7 +1765,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
           await addUserNotification(targetId, `${amount.toLocaleString()} Coins Added!`, `You received ${amount.toLocaleString()} coins. Reason: ${reason || "Admin credit"}`, "credit", amount);
           if (targetId === user.id) {
             playCoinSound();
-            if (onRewardEarned) onRewardEarned(amount, "Admin Credit", `Admin added ${amount.toLocaleString()} coins to your account.`);
           }
           showNotif("success", `Added ${amount} coins to user`);
           setProfilesRefreshKey(k => k + 1);
@@ -1384,7 +1794,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         localStorage.setItem("coinloot_profile_v3", JSON.stringify(p));
       }
       playCoinSound();
-      if (onRewardEarned) onRewardEarned(amount, "Admin Credit", `Admin added ${amount.toLocaleString()} coins to your account.`);
     }
     showNotif("success", `Added ${amount} coins to user`);
   };
@@ -1640,7 +2049,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const savePromoCodes = (codes: PromoCode[]) => {
     localStorage.setItem("coinloot_promo_codes", JSON.stringify(codes));
     setPromoCodes(codes);
-    AdminDb.savePromoCodes(codes).catch(err => console.warn("[PromoCodes] DB sync failed:", err));
+    AdminDb.savePromoCodes(codes).then(() => {
+      window.dispatchEvent(new CustomEvent("promo-codes-changed"));
+    }).catch(err => console.warn("[PromoCodes] DB sync failed:", err));
   };
 
   // ── Notifications ──
@@ -2488,12 +2899,12 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                     </button>
                     {!isEditing && (
                       <button disabled={isSyncing} onClick={() => handleTestConnection(p.name)} className={`flex-1 min-w-[60px] py-2 rounded-xl text-[9px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 ${isTesting ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-800/60 text-slate-400 border border-white/5 hover:border-cyan-500/20"}`}>
-                        {isTesting ? <><Loader2 className="w-3 h-3 animate-spin" /> Testing</> : <><Zap className="w-3 h-3" /> Test</>}
+                        {isTesting ? <><Loader size="xs" /> Testing</> : <><Zap className="w-3 h-3" /> Test</>}
                       </button>
                     )}
                     {!isEditing && (
                       <button disabled={isSyncing} onClick={() => handleSyncProvider(p.name)} className="flex-1 min-w-[60px] py-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50">
-                        {isSyncing && !isTesting ? <><Loader2 className="w-3 h-3 animate-spin" /> Syncing</> : <><RefreshCw className="w-3 h-3" /> Sync</>}
+                        {isSyncing && !isTesting ? <><Loader size="xs" /> Syncing</> : <><RefreshCw className="w-3 h-3" /> Sync</>}
                       </button>
                     )}
                     {isEditing && (
@@ -2559,8 +2970,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
           tracking_link: newOffer.tracking_link || "",
           max_reward: newOffer.max_reward || 0,
           is_pinned: newOffer.is_pinned || false,
+          imageUrl: newOffer.imageUrl || "",
         }]);
-        setNewOffer({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false });
+        setNewOffer({ title: "", provider: "Torox", payout: 100, difficulty: "Easy", description_full: "", estimated_time: "15 min", countries: 10, is_mobile_only: false, tracking_link: "", max_reward: 0, is_pinned: false, imageUrl: "" });
         setShowAddOffer(false);
         showNotif("success", "Offer created");
         addLog("OFFER_CREATED", "offer", id, `Created offer ${newOffer.title}`);
@@ -2600,6 +3012,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                   <input value={newOffer.tracking_link} onChange={(e) => setNewOffer({ ...newOffer, tracking_link: e.target.value })} placeholder="Tracking link (URL)" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
                 </div>
                 <textarea value={newOffer.description_full} onChange={(e) => setNewOffer({ ...newOffer, description_full: e.target.value })} placeholder="Full description (optional)" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none mb-3" rows={2} />
+                <div className="mb-3">
+                  <input value={newOffer.imageUrl} onChange={(e) => setNewOffer({ ...newOffer, imageUrl: e.target.value })} placeholder="Offer image URL (optional)" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                </div>
                 <div className="flex items-center gap-4 mb-3">
                   <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
                     <input type="checkbox" checked={newOffer.is_mobile_only} onChange={(e) => setNewOffer({ ...newOffer, is_mobile_only: e.target.checked })} className="accent-cyan-500" />
@@ -2667,6 +3082,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                                 <input type="number" value={editOfferFull.max_reward || 0} onChange={(e) => setEditOfferFull({ ...editOfferFull, max_reward: parseInt(e.target.value) || 0 })} placeholder="Max reward" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
                                 <input value={editOfferFull.tracking_link || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, tracking_link: e.target.value })} placeholder="Tracking link" className="bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" />
                               </div>
+                              <div className="mb-3"><input value={editOfferFull.imageUrl || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, imageUrl: e.target.value })} placeholder="Offer image URL" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600" /></div>
                               <textarea value={editOfferFull.description_full || ""} onChange={(e) => setEditOfferFull({ ...editOfferFull, description_full: e.target.value })} placeholder="Full description" className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white placeholder-slate-600 resize-none" rows={2} />
                               <div className="flex items-center gap-4">
                                 <label className="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
@@ -2743,7 +3159,6 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
         saveAccounts(accs);
         addLog("BONUS_ALL", "system", "all", `Bonus of ${coinAmount} coins to all users`);
         playCoinSound();
-        if (onRewardEarned) onRewardEarned(coinAmount, "Admin Bonus", `Admin sent ${coinAmount.toLocaleString()} coins to all users.`);
         showNotif("success", `Bonus of ${coinAmount} coins sent to all users`);
       };
       return (
@@ -3405,7 +3820,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
               <p className="text-[10px] text-slate-500 font-mono mt-1">Review and manage identity verification requests.</p>
             </div>
             <button onClick={loadServerRecords} disabled={loadingRecords} className="px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-[9px] text-slate-300 hover:border-white/20 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50">
-              <RefreshCw className={`w-3 h-3 ${loadingRecords ? "animate-spin" : ""}`} /> Refresh
+              {loadingRecords ? <Loader size="xs" /> : <RefreshCw className="w-3 h-3" />} Refresh
             </button>
           </div>
 
@@ -3951,16 +4366,20 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
     // ═══ HOMEPAGE — Earn Page Sections ═══
     if (section === "homepage") {
       const toggleSection = async (key: string) => {
-        const updated = { ...homepageSections, [key]: !homepageSections[key] };
+        const defaults: AdminDb.HomepageSections = { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true };
+        const updated = { ...defaults, ...homepageSections, [key]: !homepageSections[key] };
+        // Optimistic local update
         setHomepageSections(updated);
         localStorage.setItem("coinloot_homepage_sections", JSON.stringify(updated));
         try {
           await AdminDb.saveHomepageSections(updated);
           showNotif("success", `${key.charAt(0).toUpperCase() + key.slice(1)} ${updated[key] ? "visible" : "hidden"}`);
+          window.dispatchEvent(new CustomEvent("homepage-sections-changed", { detail: updated }));
         } catch {
           showNotif("error", `Failed to save homepage settings to database`);
+          // Revert: reload from DB to restore correct state
+          loadHomepageSections();
         }
-        window.dispatchEvent(new CustomEvent("homepage-sections-changed", { detail: updated }));
       };
       const sectionMeta: { key: string; label: string; icon: any; desc: string }[] = [
         { key: "featured", label: "Featured Offers", icon: Crown, desc: "Show the Featured Offers carousel on the earn page" },
@@ -4014,7 +4433,318 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
       );
     }
 
-    
+    // ═══ ANNOUNCEMENTS & PROMO CODES ═══
+    if (section === "announcements-promos") {
+      const handleCreateAnnouncement = async () => {
+        if (!announcementTitle.trim() || !announcementMessage.trim()) {
+          showNotif("error", "Title and message are required");
+          return;
+        }
+        try {
+          await AdminDb.createAnnouncement(
+            { title: announcementTitle.trim(), message: announcementMessage.trim() },
+            user.id
+          );
+          setShowAddAnnouncement(false);
+          setAnnouncementTitle("");
+          setAnnouncementMessage("");
+          await loadAnnouncements();
+          window.dispatchEvent(new CustomEvent("announcements-changed"));
+          showNotif("success", "Announcement created");
+          addLog("ANNOUNCEMENT_CREATED", "settings", "announcement", `Created announcement: ${announcementTitle}`);
+        } catch {
+          showNotif("error", "Failed to create announcement");
+        }
+      };
+
+      const handleDeleteAnnouncement = async (id: string, title: string) => {
+        try {
+          await AdminDb.deleteAnnouncement(id);
+          await loadAnnouncements();
+          window.dispatchEvent(new CustomEvent("announcements-changed"));
+          showNotif("success", "Announcement deleted");
+          addLog("ANNOUNCEMENT_DELETED", "settings", "announcement", `Deleted announcement: ${title}`);
+        } catch {
+          showNotif("error", "Failed to delete announcement");
+        }
+      };
+
+      const handleToggleAnnouncement = async (id: string, currentActive: boolean) => {
+        try {
+          await AdminDb.toggleAnnouncementStatus(id, !currentActive);
+          await loadAnnouncements();
+          window.dispatchEvent(new CustomEvent("announcements-changed"));
+          showNotif("success", `Announcement ${!currentActive ? "activated" : "deactivated"}`);
+        } catch {
+          showNotif("error", "Failed to toggle announcement");
+        }
+      };
+
+      const startEditAnnouncement = (a: any) => {
+        setEditingAnnouncement(a);
+        setAnnouncementTitle(a.title);
+        setAnnouncementMessage(a.message);
+        setShowAddAnnouncement(true);
+      };
+
+      const handleUpdateAnnouncement = async () => {
+        if (!editingAnnouncement || !announcementTitle.trim() || !announcementMessage.trim()) {
+          showNotif("error", "Title and message are required");
+          return;
+        }
+        try {
+          await AdminDb.updateAnnouncement(editingAnnouncement.id, {
+            title: announcementTitle.trim(),
+            message: announcementMessage.trim(),
+          });
+          setEditingAnnouncement(null);
+          setShowAddAnnouncement(false);
+          setAnnouncementTitle("");
+          setAnnouncementMessage("");
+          await loadAnnouncements();
+          window.dispatchEvent(new CustomEvent("announcements-changed"));
+          showNotif("success", "Announcement updated");
+        } catch {
+          showNotif("error", "Failed to update announcement");
+        }
+      };
+
+      // Promo codes (reusing existing section logic)
+      const addCode = () => {
+        if (!promoFormCode.code.trim()) { showNotif("error", "Promo code is required"); return; }
+
+        let expiresAt: string;
+        if (promoFormCode.expirationMode === "exact" && promoFormCode.exactExpiresAt) {
+          expiresAt = new Date(promoFormCode.exactExpiresAt).toISOString();
+        } else {
+          const ms = (promoFormCode.expDays * 86400000) + (promoFormCode.expHours * 3600000) + (promoFormCode.expMinutes * 60000) + (promoFormCode.expSeconds * 1000);
+          expiresAt = new Date(Date.now() + ms).toISOString();
+        }
+
+        const promo: any = {
+          id: `promo-${Date.now()}`,
+          code: promoFormCode.code.toUpperCase(),
+          coins: promoFormCode.coins,
+          maxUses: promoFormCode.maxUses,
+          currentUses: 0,
+          expiresAt,
+          countryRestriction: [],
+          active: true,
+          createdAt: new Date().toISOString(),
+        };
+        savePromoCodes([...promoCodes, promo]);
+        setPromoFormCode({ code: "", coins: 500, maxUses: 100, expirationMode: "relative", expDays: 30, expHours: 0, expMinutes: 0, expSeconds: 0, exactExpiresAt: "" });
+        showNotif("success", "Promo code created");
+        addLog("PROMO_CREATED", "promo", promo.id, `Created promo code ${promoFormCode.code}`);
+      };
+
+      return (
+        <div className="p-4 lg:p-6 space-y-6 max-w-4xl">
+          <AdminBackBtn onClick={goBack} />
+          <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+            <Megaphone className="w-5 h-5 text-cyan-400" /> Announcements & Promo Codes
+          </h1>
+          <p className="text-[10px] text-slate-500 font-mono">Manage global announcements and promo codes for all users.</p>
+
+          {/* ─── ANNOUNCEMENTS ─── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-cyan-400" /> Announcements
+              </h2>
+              <button
+                onClick={() => { setShowAddAnnouncement(!showAddAnnouncement); setEditingAnnouncement(null); setAnnouncementTitle(""); setAnnouncementMessage(""); }}
+                className="px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> {showAddAnnouncement ? "Cancel" : "Add Announcement"}
+              </button>
+            </div>
+
+            {showAddAnnouncement && (
+              <div className="space-y-3 p-4 rounded-2xl bg-slate-900/40 border border-white/5">
+                <input
+                  value={announcementTitle}
+                  onChange={(e) => setAnnouncementTitle(e.target.value)}
+                  placeholder="Announcement title..."
+                  className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/20"
+                />
+                <textarea
+                  value={announcementMessage}
+                  onChange={(e) => setAnnouncementMessage(e.target.value)}
+                  placeholder="Announcement message..."
+                  rows={3}
+                  className="w-full bg-slate-950 border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 font-mono resize-none focus:outline-none focus:border-cyan-500/20"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={editingAnnouncement ? handleUpdateAnnouncement : handleCreateAnnouncement}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer"
+                  >
+                    {editingAnnouncement ? "Update" : "Create"}
+                  </button>
+                  <button
+                    onClick={() => { setShowAddAnnouncement(false); setEditingAnnouncement(null); }}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-400 text-[10px] font-bold border border-white/5 hover:text-white transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {announcements.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-6 font-mono">No announcements yet.</p>
+              ) : (
+                announcements.map((a: any) => (
+                  <div key={a.id} className="p-4 rounded-2xl bg-slate-900/40 border border-white/5 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${a.is_active ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800 text-slate-500 border border-slate-700/30"}`}>
+                          {a.is_active ? "Active" : "Inactive"}
+                        </span>
+                        <span className="text-[9px] font-mono text-slate-500">{new Date(a.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white">{a.title}</h4>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{a.message}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => startEditAnnouncement(a)} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer">
+                        <Edit className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => handleToggleAnnouncement(a.id, a.is_active)} className={`p-1.5 rounded-lg border transition-all cursor-pointer ${a.is_active ? "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"}`}>
+                        {a.is_active ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                      <button onClick={() => handleDeleteAnnouncement(a.id, a.title)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* ─── PROMO CODES ─── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5 space-y-4">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Gift className="w-4 h-4 text-purple-400" /> Promo Codes
+            </h2>
+
+            {/* Create Form */}
+            <div className="flex items-end gap-2 flex-wrap mb-3">
+              <div className="flex-1 min-w-[120px]">
+                <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Code</label>
+                <input value={promoFormCode.code} onChange={(e) => setPromoFormCode({ ...promoFormCode, code: e.target.value.toUpperCase() })} placeholder="BONUS100" className="w-full bg-slate-950 border border-white/5 rounded-xl px-2.5 py-1.5 text-[10px] text-white font-mono uppercase focus:outline-none focus:border-cyan-500/20" />
+              </div>
+              <div className="w-20">
+                <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Coins</label>
+                <input type="number" value={promoFormCode.coins} onChange={(e) => setPromoFormCode({ ...promoFormCode, coins: parseInt(e.target.value) || 0 })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2.5 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+              </div>
+              <div className="w-20">
+                <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Max Uses</label>
+                <input type="number" value={promoFormCode.maxUses} onChange={(e) => setPromoFormCode({ ...promoFormCode, maxUses: parseInt(e.target.value) || 1 })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2.5 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+              </div>
+              <button onClick={addCode} className="py-2 px-4 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer">
+                <Plus className="w-3 h-3 inline mr-1" /> Create
+              </button>
+            </div>
+
+            {/* Expiration Settings */}
+            <div className="bg-slate-900/30 rounded-2xl border border-white/5 p-4 space-y-3">
+              <div className="flex items-center gap-4">
+                <label className={`flex items-center gap-2 px-3 py-1.5 rounded-xl cursor-pointer transition-all text-[10px] font-bold ${promoFormCode.expirationMode === "relative" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "bg-slate-800/60 text-slate-400 border border-white/5"}`}>
+                  <input type="radio" name="expMode" checked={promoFormCode.expirationMode === "relative"} onChange={() => setPromoFormCode({ ...promoFormCode, expirationMode: "relative" })} className="sr-only" />
+                  <Clock className="w-3 h-3" /> Relative Time
+                </label>
+                <label className={`flex items-center gap-2 px-3 py-1.5 rounded-xl cursor-pointer transition-all text-[10px] font-bold ${promoFormCode.expirationMode === "exact" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "bg-slate-800/60 text-slate-400 border border-white/5"}`}>
+                  <input type="radio" name="expMode" checked={promoFormCode.expirationMode === "exact"} onChange={() => setPromoFormCode({ ...promoFormCode, expirationMode: "exact" })} className="sr-only" />
+                  <Calendar className="w-3 h-3" /> Exact Date & Time
+                </label>
+              </div>
+
+              {promoFormCode.expirationMode === "relative" ? (
+                <div className="flex items-end gap-2 flex-wrap">
+                  <div className="w-16">
+                    <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Days</label>
+                    <input type="number" value={promoFormCode.expDays} onChange={(e) => setPromoFormCode({ ...promoFormCode, expDays: Math.max(0, parseInt(e.target.value) || 0) })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+                  </div>
+                  <div className="w-16">
+                    <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Hours</label>
+                    <input type="number" min={0} max={23} value={promoFormCode.expHours} onChange={(e) => setPromoFormCode({ ...promoFormCode, expHours: Math.max(0, Math.min(23, parseInt(e.target.value) || 0)) })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+                  </div>
+                  <div className="w-16">
+                    <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Minutes</label>
+                    <input type="number" min={0} max={59} value={promoFormCode.expMinutes} onChange={(e) => setPromoFormCode({ ...promoFormCode, expMinutes: Math.max(0, Math.min(59, parseInt(e.target.value) || 0)) })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+                  </div>
+                  <div className="w-16">
+                    <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Seconds</label>
+                    <input type="number" min={0} max={59} value={promoFormCode.expSeconds} onChange={(e) => setPromoFormCode({ ...promoFormCode, expSeconds: Math.max(0, Math.min(59, parseInt(e.target.value) || 0)) })} className="w-full bg-slate-950 border border-white/5 rounded-xl px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20" />
+                  </div>
+                  <div className="text-[9px] text-slate-500 font-mono py-1.5">
+                    Expires: {new Date(Date.now() + (promoFormCode.expDays * 86400000) + (promoFormCode.expHours * 3600000) + (promoFormCode.expMinutes * 60000) + (promoFormCode.expSeconds * 1000)).toLocaleString()}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[8px] text-slate-500 font-mono block mb-0.5">Expiration Date & Time</label>
+                  <input type="datetime-local" value={promoFormCode.exactExpiresAt} onChange={(e) => setPromoFormCode({ ...promoFormCode, exactExpiresAt: e.target.value })} className="bg-slate-950 border border-white/5 rounded-xl px-3 py-1.5 text-[10px] text-white font-mono focus:outline-none focus:border-cyan-500/20 [color-scheme:dark]" />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {promoCodes.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-4 font-mono">No promo codes yet.</p>
+              ) : (
+                promoCodes.map((c: any) => {
+                  const now = Date.now();
+                  const expTime = new Date(c.expiresAt).getTime();
+                  const isExpired = expTime <= now;
+                  const remaining = Math.max(0, Math.floor((expTime - now) / 1000));
+                  const d = Math.floor(remaining / 86400);
+                  const h = Math.floor((remaining % 86400) / 3600);
+                  const m = Math.floor((remaining % 3600) / 60);
+                  const s = remaining % 60;
+                  return (
+                    <div key={c.id} className="p-4 rounded-2xl bg-slate-900/40 border border-white/5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <code className="px-2 py-0.5 rounded bg-black/40 border border-purple-500/20 text-purple-300 text-[10px] font-mono font-bold">{c.code}</code>
+                            <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${!c.active ? "bg-slate-800 text-slate-500" : isExpired ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+                              {!c.active ? "Inactive" : isExpired ? "Expired" : "Active"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[9px] font-mono text-slate-500 flex-wrap">
+                            <span>{c.coins.toLocaleString()} coins</span>
+                            <span>{c.currentUses || 0}/{c.maxUses} uses</span>
+                            <span>Created: {new Date(c.createdAt).toLocaleDateString()}</span>
+                            <span>Expires: {new Date(c.expiresAt).toLocaleDateString()} {new Date(c.expiresAt).toLocaleTimeString()}</span>
+                            {!isExpired && c.active && (
+                              <span className="text-amber-400">{d}d {h}h {m}m {s}s remaining</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => { savePromoCodes(promoCodes.map((x: any) => x.id === c.id ? { ...x, active: !x.active } : x)); addLog("PROMO_TOGGLED", "promo", c.id, `Toggled promo ${c.code} to ${!c.active}`); showNotif("success", "Promo toggled"); }} className={`p-1.5 rounded-lg border transition-all cursor-pointer ${c.active ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"}`}>
+                            {c.active ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+                          <button onClick={() => { savePromoCodes(promoCodes.filter((x: any) => x.id !== c.id)); addLog("PROMO_DELETED", "promo", c.id, `Deleted promo ${c.code}`); showNotif("success", "Promo deleted"); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ═══ REWARDS & CHALLENGES ═══
     if (section === "rewards-challenges") {
       return <RewardsChallengesManagement />;

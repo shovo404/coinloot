@@ -207,7 +207,7 @@ export default function VpnApiConfigSection({ showNotif }: VpnApiConfigSectionPr
               disabled={saving || !apiKeyInput.trim()}
               className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
             >
-              {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              {saving ? <Loader size="xs" /> : <Save className="w-3 h-3" />}
               Save API Key
             </button>
             <button
@@ -215,7 +215,7 @@ export default function VpnApiConfigSection({ showNotif }: VpnApiConfigSectionPr
               disabled={testing}
               className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-cyan-500/20 hover:text-cyan-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
             >
-              {testing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              {testing ? <Loader size="xs" /> : <RefreshCw className="w-3 h-3" />}
               Test Connection
             </button>
           </div>

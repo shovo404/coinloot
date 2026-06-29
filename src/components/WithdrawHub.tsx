@@ -3,6 +3,7 @@ import {
   Building2, CreditCard, DollarSign, Wallet, ShieldAlert, ArrowRight, CheckCircle,
   History, Clock, AlertTriangle, AlertCircle, Sparkles, Send, Copy, Coins, Zap
 } from "lucide-react";
+import Loader from "./Loader";
 import { UserProfile, WithdrawalRequest } from "../types";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { calcLevel } from "../utils/levelSystem";
@@ -507,9 +508,8 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
 
               {/* ── VPN Checking Loader ── */}
               {vpnChecking && (
-                <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-[10px] text-cyan-300 leading-normal flex gap-2 items-center">
-                  <Wallet className="w-4 h-4 animate-spin" />
-                  <span>Verifying network security...</span>
+                <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl flex items-center justify-center">
+                  <Loader size="xs" text="Verifying network security" />
                 </div>
               )}
 
@@ -531,7 +531,7 @@ export default function WithdrawHub({ user, setUser, withdrawals, onAddWithdrawa
               >
                 {withdrawingState ? (
                   <>
-                    <Wallet className="w-4 h-4 text-cyan-400 animate-spin" />
+                    <Loader size="xs" />
                     <span>Processing Withdrawal...</span>
                   </>
                 ) : (

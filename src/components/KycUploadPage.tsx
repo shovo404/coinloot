@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ShieldCheck, Upload, CheckCircle, AlertCircle, X, FileText, Camera, IdCard, Lock, AlertTriangle, User, Calendar, Clock, RefreshCw } from "lucide-react";
+import Loader from "./Loader";
 import { UserProfile } from "../types";
 import { submitKyc, getKycRecord, KycDocType } from "../utils/kycEngine";
 
@@ -378,7 +379,7 @@ export default function KycUploadPage({ user, setUser }: KycUploadPageProps) {
         disabled={submitting}
         className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-cyan-500 text-white text-xs font-bold hover:scale-[1.01] transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
-        {submitting ? "Submitting..." : "Submit Verification"}
+        {submitting ? <><Loader size="xs" /> Submitting...</> : "Submit Verification"}
       </button>
 
       <p className="text-[9px] text-slate-500 text-center font-mono">Your documents are encrypted and securely stored. We never share your data.</p>

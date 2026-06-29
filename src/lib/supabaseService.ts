@@ -383,49 +383,81 @@ export async function verifyAdminAccess(userId: string): Promise<boolean> {
 
 // ─── Promo Codes ──────────────────────────────────────────────────────────────
 
-export async function validatePromoCode(code: string, userId: string) {
-  const sb = getSupabaseClient();
-  if (!sb) return null;
+export interface PromoClaimResult {
+  success: boolean;
+  error?: string;
+  promo?: any;
+  coins?: number;
+}
 
-  // Find active promo code
-  const { data: promo } = await sb
+export async function validatePromoCode(code: string, userId: string): Promise<PromoClaimResult> {
+  const sb = getSupabaseClient();
+  if (!sb) return { success: false, error: "Service unavailable" };
+
+  // Try the promo_codes DB table first
+  const { data: promo, error: promoErr } = await sb
     .from("promo_codes")
     .select("*")
     .eq("code", code.toUpperCase())
     .eq("is_active", true)
     .maybeSingle();
 
-  if (!promo) return null;
-  if (promo.current_uses >= promo.max_uses) return null;
-  if (new Date(promo.expires_at) < new Date()) return null;
+  if (!promoErr && promo) {
+    if (new Date(promo.expires_at) < new Date()) return { success: false, error: "This promo code has expired" };
+    if (promo.current_uses >= promo.max_uses) return { success: false, error: "This promo code has reached its maximum uses" };
 
-  // Check if user already redeemed
-  const { data: existing } = await sb
-    .from("promo_code_redemptions")
-    .select("*")
-    .eq("promo_code_id", promo.id)
-    .eq("user_id", userId)
-    .maybeSingle();
+    const { data: existing } = await sb
+      .from("promo_code_redemptions")
+      .select("*")
+      .eq("promo_code_id", promo.id)
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (existing) return null;
+    if (existing) return { success: false, error: "You have already claimed this promo code" };
 
-  // Award coins
-  await addCoins(userId, promo.coins, "PROMO_REWARD", `Promo: ${code}`, `Promo code ${code} redeemed for ${promo.coins} coins`);
+    const { error: insertErr } = await sb.from("promo_code_redemptions").insert({
+      promo_code_id: promo.id, user_id: userId, coins_awarded: promo.coins,
+    });
+    if (insertErr) {
+      if (insertErr.code === "23505") return { success: false, error: "You have already claimed this promo code" };
+      return { success: false, error: "Failed to claim promo code" };
+    }
 
-  // Record redemption
-  await sb.from("promo_code_redemptions").insert({
-    promo_code_id: promo.id,
-    user_id: userId,
-    coins_awarded: promo.coins,
-  });
+    await sb.from("promo_codes").update({ current_uses: promo.current_uses + 1 }).eq("id", promo.id);
+    try { await addCoins(userId, promo.coins, "PROMO_REWARD", `Promo: ${code}`, `Promo code ${code} redeemed for ${promo.coins} coins`); } catch {}
+    return { success: true, promo, coins: promo.coins };
+  }
 
-  // Increment usage count
-  await sb
-    .from("promo_codes")
-    .update({ current_uses: promo.current_uses + 1 })
-    .eq("id", promo.id);
+  // Fallback: check JSON blob in site_settings (admin-created codes from Announcements & Promo Codes section)
+  try {
+    const { data: settings } = await sb.from("site_settings").select("setting_value").eq("setting_key", "promo_codes").maybeSingle();
+    if (settings?.setting_value) {
+      const adminCodes: any[] = JSON.parse(settings.setting_value);
+      const match = adminCodes.find((c: any) => c.code === code.toUpperCase() && c.active);
+      if (!match) return { success: false, error: "Invalid promo code" };
+      if (new Date(match.expiresAt) < new Date()) return { success: false, error: "This promo code has expired" };
+      if (match.currentUses >= match.maxUses) return { success: false, error: "This promo code has reached its maximum uses" };
 
-  return promo;
+      // Check if user already claimed (using localStorage fallback since JSON blob has no per-user redemption table)
+      const claimed: string[] = JSON.parse(localStorage.getItem("coinloot_claimed_promos") || "[]");
+      if (claimed.includes(code.toUpperCase())) return { success: false, error: "You have already claimed this promo code" };
+      claimed.push(code.toUpperCase());
+      localStorage.setItem("coinloot_claimed_promos", JSON.stringify(claimed));
+
+      // Update usage count and persist
+      match.currentUses += 1;
+      const updated = adminCodes.map((c: any) => c.code === code.toUpperCase() ? match : c);
+      try {
+        await sb.from("site_settings").update({ setting_value: JSON.stringify(updated) }).eq("setting_key", "promo_codes");
+        window.dispatchEvent(new CustomEvent("promo-codes-changed"));
+      } catch {}
+
+      try { await addCoins(userId, match.coins, "PROMO_REWARD", `Promo: ${code}`, `Promo code ${code} redeemed for ${match.coins} coins`); } catch {}
+      return { success: true, promo: match, coins: match.coins };
+    }
+  } catch {}
+
+  return { success: false, error: "Invalid promo code" };
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -681,4 +713,63 @@ export async function getWithdrawalMethods(): Promise<any[]> {
     { id: "binance", name: "Binance Pay", icon: "🌐", minCoins: 1000, type: "binance", fieldLabel: "Binance UID / Email", placeholder: "Enter your Binance UID or email", description: "Withdraw via Binance Pay. Min: 1,000 coins.", status: "ACTIVE" },
     { id: "usdt", name: "USDT (TRC-20)", icon: "₮", minCoins: 2000, type: "usdt", fieldLabel: "USDT Wallet Address", placeholder: "Enter your TRC-20 wallet address", description: "Withdraw via USDT (TRC-20). Min: 2,000 coins.", status: "ACTIVE" },
   ];
+}
+
+// ─── Social Bounty Campaigns (user-facing) ─────────────────────────────────
+
+export async function getActiveCampaigns() {
+  const sb = getSupabaseClient();
+  if (!sb) return [];
+  const { data } = await sb.from("social_campaigns").select("*").eq("is_active", true).order("created_at", { ascending: false });
+  return data || [];
+}
+
+export async function getCampaignWithTasks(campaignId: string) {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  const { data: campaign } = await sb.from("social_campaigns").select("*").eq("id", campaignId).maybeSingle();
+  if (!campaign) return null;
+  const { data: tasks } = await sb.from("campaign_tasks").select("*").eq("campaign_id", campaignId).eq("is_active", true).order("sort_order", { ascending: true });
+  return { ...campaign, tasks: tasks || [] };
+}
+
+export async function getUserCampaignSubmissions(userId: string, campaignId?: string) {
+  const sb = getSupabaseClient();
+  if (!sb) return [];
+  let query = sb.from("campaign_submissions").select("*, campaign_submission_screenshots(*)").eq("user_id", userId);
+  if (campaignId) query = query.eq("campaign_id", campaignId);
+  query = query.order("created_at", { ascending: false });
+  const { data } = await query;
+  return data || [];
+}
+
+export async function submitCampaign(campaignId: string, userId: string, screenshotUrls: string[]) {
+  const sb = getSupabaseClient();
+  if (!sb) throw new Error("Supabase client not available");
+
+  const { data: campaign } = await sb.from("social_campaigns").select("*").eq("id", campaignId).single();
+  if (!campaign) throw new Error("Campaign not found");
+  if (!campaign.is_active) throw new Error("Campaign is not active");
+
+  const existing = await getUserCampaignSubmissions(userId, campaignId);
+  const hasApproved = existing.some(s => s.status === "approved");
+  if (hasApproved) throw new Error("You have already completed this campaign");
+  const hasPending = existing.some(s => s.status === "pending");
+  if (hasPending) throw new Error("You already have a pending submission for this campaign");
+
+  const { data: submission, error } = await sb.from("campaign_submissions").insert({
+    campaign_id: campaignId,
+    user_id: userId,
+    status: "pending",
+    total_reward: campaign.reward_coins,
+  }).select().single();
+  if (error) throw error;
+
+  if (screenshotUrls.length > 0) {
+    const screenshotRows = screenshotUrls.map(url => ({ submission_id: submission.id, screenshot_url: url }));
+    const { error: ssError } = await sb.from("campaign_submission_screenshots").insert(screenshotRows);
+    if (ssError) throw ssError;
+  }
+
+  return submission;
 }

@@ -682,59 +682,86 @@ app.post("/api/offerwall/fetch", async (req, res) => {
   const difficultyOptions = ["Easy", "Medium", "Hard"] as const;
   const categories = ["trending", "high-paying", "new", "recommended"] as const;
 
-  // Simulate fetching offers from the provider's API.
-  // In production, replace this with an actual API call using provider.apiKey / provider.publisherId.
-  const offerTemplates: Record<string, { titles: string[]; descs: string[] }> = {
+  // In production, replace with an actual API call using provider.apiKey / provider.publisherId.
+  // Example: const response = await fetch(`https://api.provider.com/offers?api_key=${provider.apiKey}`);
+
+  const offerTemplates: Record<string, { titles: string[]; descs: string[]; steps?: string[][] }> = {
     "TOROX": {
-      titles: ["TOROX Premium Offerwall", "TOROX Star Survey Pack", "TOROX Install & Earn", "TOROX Video Rewards", "TOROX Daily Bonus"],
-      descs: ["High-paying offers from top brands.", "Quick surveys with instant payout.", "Install apps and earn coins.", "Watch videos and earn rewards.", "Daily tasks for bonus coins."],
+      titles: ["Rise of Kingdoms", "Coin Master Free Spins", "Bingo Blitz - Bingo Games", "Solitaire Grand Harvest", "Wordscapes - Word Game"],
+      descs: ["Build your empire and earn rewards.", "Spin the wheel for free coins.", "Play bingo and win prizes.", "Harvest crops with solitaire.", "Train your brain with word puzzles."],
+      steps: [["Install the app", "Reach level 5", "Complete tutorial", "Earn bonus coins"], ["Open the app", "Spin 3 times", "Collect rewards", "Share with friends"], ["Download game", "Play 5 rounds", "Win a jackpot", "Invite a friend"], ["Install game", "Complete 10 levels", "Harvest bonus crops", "Daily login"], ["Download app", "Solve 20 puzzles", "Unlock bonus packs", "Play word challenges"]],
     },
     "AdGate Media": {
-      titles: ["AdGate Discovery Offer", "AdGate App Install", "AdGate Survey Panel", "AdGate Game Trial", "AdGate Reward Wall"],
-      descs: ["Discover new products and earn.", "Install apps and complete trials.", "Share your opinion in surveys.", "Try new games for coins.", "Complete tasks on the reward wall."],
+      titles: ["Final Fantasy XV: War for Eos", "Golf Clash - Golf Game", "Yahtzee With Buddies", "June's Journey - Hidden Objects", "Dice Dreams - Dice Game"],
+      descs: ["Command heroes in epic battles.", "Compete in real-time golf matches.", "Roll the dice with friends.", "Find hidden objects in mysteries.", "Build your dream island with dice."],
+      steps: [["Install game", "Complete tutorial", "Reach level 3", "Join a guild"], ["Open app", "Play 3 matches", "Win a trophy", "Upgrade clubs"], ["Download game", "Play 5 rounds", "Win a game", "Unlock new dice"], ["Install app", "Complete chapter 1", "Find 10 hidden objects", "Decorate your island"], ["Download game", "Roll 10 times", "Collect stars", "Build landmarks"]],
     },
     "AdGem": {
-      titles: ["AdGem Offer Wall", "AdGem App Install", "AdGate Survey Panel", "AdGem Game Trial", "AdGem Daily Tasks"],
-      descs: ["Browse and complete offers.", "Install mobile apps.", "Earn from surveys.", "Try new games.", "Complete daily tasks."],
+      titles: ["Merge Dragons - Puzzle Game", "Board Kings - Board Game", "Pop! Slots - Casino Slots", "Harry Potter: Puzzles & Spells", "Two Dots - Puzzle Game"],
+      descs: ["Merge dragons and explore magical lands.", "Roll the dice on a board game adventure.", "Spin slot machines for jackpots.", "Solve match-3 puzzles in the wizarding world.", "Connect dots in this relaxing puzzler."],
+      steps: [["Install game", "Merge 5 dragons", "Complete level 1", "Unlock new land"], ["Open app", "Roll dice 5 times", "Collect coins", "Visit a friend's board"], ["Download app", "Spin 10 times", "Hit a bonus round", "Collect chips"], ["Install game", "Complete 10 puzzles", "Unlock spells", "Earn stars"], ["Download app", "Connect 100 dots", "Complete level 5", "Unlock power-ups"]],
     },
     "Lootably": {
-      titles: ["Lootably Offer Wall", "Lootably Survey", "Lootably App Install", "Lootably Video", "Lootably Daily Bonus"],
-      descs: ["Complete offers for coins.", "Take quick surveys.", "Install and play apps.", "Watch promotional videos.", "Daily check-in bonus."],
+      titles: ["Monopoly GO! - Board Game", "Solitaire - Classic Card Game", "Spider Solitaire", "Mahjong - Tile Game", "Block Blast - Puzzle Game"],
+      descs: ["Roll dice and build your empire.", "Play the classic card game.", "Challenge yourself with spider solitaire.", "Match tiles in this ancient game.", "Blast blocks in this addictive puzzle."],
+      steps: [["Install game", "Complete tutorial", "Build 3 landmarks", "Collect rent"], ["Open app", "Play 5 games", "Win 2 games", "Change card backs"], ["Download app", "Complete 3 levels", "Use a hint", "Beat high score"], ["Install game", "Match 10 pairs", "Complete level 1", "Use a shuffle"], ["Download game", "Score 1000 points", "Clear 10 rows", "Unlock new mode"]],
     },
     "Revenue Universe": {
-      titles: ["RevU Special Offer", "RevU Crypto Signup", "RevU Survey", "RevU App Install", "RevU Credit Card Offer"],
-      descs: ["Exclusive high-paying offers.", "Crypto platform signups.", "Market research surveys.", "App installs and trials.", "Financial product signups."],
+      titles: ["Raid: Shadow Legends", "Game of Thrones Slots Casino", "Bingo Blitz", "Jackpot World - Casino", "Cashman Casino Slots"],
+      descs: ["Collect champions and battle darkness.", "Spin the reels in Westeros.", "Play bingo across the globe.", "Win jackpots in a world casino.", "Play slots for real cash prizes."],
+      steps: [["Install game", "Complete tutorial", "Summon 3 champions", "Join a clan"], ["Open app", "Spin 10 times", "Hit a bonus feature", "Collect coins"], ["Download app", "Play 3 bingo rooms", "Win a jackpot", "Collect power-ups"], ["Install game", "Spin 20 times", "Unlock new slot", "Collect daily bonus"], ["Download game", "Spin 15 times", "Hit the jackpot", "Level up"]],
     },
     "CPX Research": {
-      titles: ["CPX Consumer Survey", "CPX Tech Survey", "CPX Market Research", "CPX Product Feedback", "CPX Opinion Panel"],
-      descs: ["Share your consumer opinions.", "Tech product feedback surveys.", "Market research studies.", "Product testing and feedback.", "Long-term opinion panel."],
+      titles: ["Monopoly Slots - Casino", "Goblins Wood - Puzzle Game", "Solitaire TriPeaks", "Word Stacks - Word Game", "Scatter Slots - Casino"],
+      descs: ["Spin slots with Monopoly themes.", "Help goblins in a puzzle adventure.", "Play tri-peaks solitaire.", "Find hidden words in stacks.", "Spin scatter slots for big wins."],
+      steps: [["Download game", "Spin 10 times", "Unlock new board", "Collect rewards"], ["Install game", "Complete 5 puzzles", "Save the goblins", "Collect gems"], ["Open app", "Complete 3 hands", "Use a wild card", "Beat high score"], ["Download app", "Find 20 words", "Complete level 3", "Unlock categories"], ["Install game", "Spin 15 times", "Hit bonus round", "Collect scatter coins"]],
     },
     "BitLabs": {
-      titles: ["BitLabs Survey", "BitLabs Offer Wall", "BitLabs App Install", "BitLabs Video Reward", "BitLabs Daily Task"],
-      descs: ["Complete surveys for coins.", "Browse offers and earn.", "Install recommended apps.", "Watch videos and earn.", "Complete daily challenges."],
+      titles: ["Bingo Bash - Bingo Game", "Jackpot Master - Slots", "World Series of Poker", "Quick Hit Slots Casino", "Vegas Downtown Slots"],
+      descs: ["Play bingo with friends worldwide.", "Become a jackpot master.", "Play poker in the world series.", "Hit quick wins in slot games.", "Experience Vegas slots at home."],
+      steps: [["Install app", "Play 3 bingo games", "Win a bingo", "Collect power-ups"], ["Download game", "Spin 10 times", "Unlock new slot", "Hit jackpot"], ["Open app", "Play 5 hands", "Win a tournament", "Collect chips"], ["Install game", "Spin 20 times", "Hit quick hit bonus", "Level up"], ["Download app", "Spin 10 times", "Unlock downtown", "Collect free coins"]],
     },
   };
 
   const template = offerTemplates[name] || {
-    titles: [`${name} Offer`, `${name} Survey`, `${name} App Install`, `${name} Video Reward`, `${name} Daily Task`],
-    descs: ["Complete this offer and earn coins.", "Take a survey and earn.", "Install the app and earn.", "Watch and earn rewards.", "Complete daily tasks."],
+    titles: [`${name} - Premium Offer`, `${name} - Flash Deal`, `${name} - Bonus Reward`, `${name} - Special Offer`, `${name} - Daily Challenge`],
+    descs: ["Complete this premium offer for big rewards.", "Limited time flash deal!", "Earn bonus coins with this offer.", "Special offer just for you.", "Complete today's challenge and earn."],
   };
+
+  // Generate a consistent seed from a string for image URL consistency
+  function hashStr(s: string): number {
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) { hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0; }
+    return Math.abs(hash);
+  }
 
   const offers = Array.from({ length: 5 }, (_, i) => {
     const diff = difficultyOptions[Math.floor(Math.random() * difficultyOptions.length)];
     const cat = categories[Math.floor(Math.random() * categories.length)];
     const basePayout = diff === "Easy" ? 500 : diff === "Medium" ? 2500 : 6000;
     const payout = basePayout + Math.floor(Math.random() * basePayout * 0.5);
+    const title = template.titles[i % template.titles.length];
+    // Use picsum.photos seeded by offer title for realistic, unique thumbnails
+    const seed = hashStr(name + "-" + title);
+    const imageUrl = `https://picsum.photos/seed/${seed}/400/225`;
+    const offerSteps = template.steps?.[i % (template.steps?.length || 1)] || [
+      "Install the app",
+      "Complete the tutorial",
+      "Reach required level",
+      "Earn reward coins",
+    ];
+
     return {
       id: `${name.toLowerCase().replace(/\s+/g, "-")}-api-${i + 1}`,
-      title: template.titles[i % template.titles.length],
+      title,
       description: template.descs[i % template.descs.length],
       payout_coins: payout,
       category: cat,
       provider: name,
-      imageUrl: `/logos/${domain?.split('.')[0] || 'default'}.png`,
+      imageUrl,
       difficulty: diff,
       link: `https://${domain}?userId=${req.body.userId || "guest"}`,
+      steps: offerSteps.map((s: string) => ({ description: s, reward_coins: Math.floor(payout / offerSteps.length), order: offerSteps.indexOf(s) + 1 })),
     };
   });
 

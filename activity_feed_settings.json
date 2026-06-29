@@ -1,0 +1,7 @@
+{
+  "showEarnings": true,
+  "showWithdrawals": true,
+  "showBonuses": false,
+  "showReferrals": true,
+  "speed": "fast"
+}

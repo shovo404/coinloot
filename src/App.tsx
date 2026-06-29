@@ -12,7 +12,7 @@ import { calcLevel } from "./utils/levelSystem";
 import DeveloperModeBanner from "./components/DeveloperModeBanner";
 import { getSupabaseClient, getCurrentSession, getCurrentUser } from "./lib/supabase";
 import { ActivityFeedItem, getDemoFeed, getStoredFeed, saveFeed, filterFeedBySettings, getTickerSettings, getSpeedMs, buildActivityMessage, mergeFeeds } from "./utils/activityFeed";
-import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting, markNotificationRead } from "./lib/supabaseService";
+import { getProfile, updateProfile, getWithdrawals, getNotifications, getAllProfiles, createWithdrawal, signOut as supabaseSignOut, getSiteSetting, markNotificationRead, addCoins } from "./lib/supabaseService";
 import { realtimeManager } from "./lib/realtimeManager";
 import { AppRealtimeProvider } from "./hooks/useAppRealtimeState";
 
@@ -28,6 +28,7 @@ import AdminDashboardPanel from "./components/AdminDashboardPanel";
 import VpnBlockPopup from "./components/VpnBlockPopup";
 import RestrictionPage from "./components/RestrictionPage";
 import SurveyHub from "./components/SurveyHub";
+import Loader from "./components/Loader";
 import WithdrawHub from "./components/WithdrawHub";
 import MyProfilePage from "./components/MyProfilePage";
 import AccountSettingsPage from "./components/AccountSettingsPage";
@@ -652,85 +653,96 @@ export default function App() {
   userProfileRef.current = userProfile;
 
   // ── Centralized Reward Handler (single source of truth for coins, level, xp) ──
-  const handleRewardEarned = useCallback((coins: number, sourceName: string, message?: string, xpGained?: number) => {
+  const handleRewardEarned = useCallback(async (coins: number, sourceName: string, message?: string, xpGained?: number) => {
     if (coins <= 0) return;
     const profile = userProfileRef.current;
-    if (profile?.status === "restricted" || profile?.status === "banned") return;
+    if (!profile || profile?.status === "restricted" || profile?.status === "banned") return;
 
     const finalMessage = message || `You earned ${coins.toLocaleString()} coins from ${sourceName}.`;
 
-    // Compute new values inside the functional updater so we always use the
-    // latest state (prev), never a stale closure/ref copy.
-    let dbUpd: Record<string, any> | null = null;
-    let dbUserId: string | undefined;
-    let newLevel = 0;
+    try {
+      // 1. Persist to Supabase FIRST: profile + coin_transactions + earnings_history + live_earnings
+      const result = await addCoins(
+        profile.id,
+        coins,
+        "EARNING",
+        sourceName,
+        finalMessage
+      );
 
-    setUserProfile((prev) => {
-      if (!prev) return prev;
-      const newCoins = prev.balance_coins + coins;
-      const newTotalEarned = prev.total_earned_coins + coins;
-      const newXp = xpGained ? prev.xp + xpGained : prev.xp;
-      newLevel = calcLevel(newCoins);
-      dbUpd = {
-        balance_coins: newCoins,
-        level: newLevel,
+      if (!result) {
+        console.error("[handleRewardEarned] addCoins returned null — DB write failed, reward NOT applied");
+        return;
+      }
+
+      const { newBalance, newTotalEarned } = result;
+      const newLevel = calcLevel(newTotalEarned);
+      const newXp = xpGained ? (profile.xp || 0) + xpGained : (profile.xp || 0);
+
+      // 2. Also persist XP to DB (addCoins doesn't handle XP)
+      if (xpGained) {
+        try {
+          await updateProfile(profile.id, { xp: newXp });
+        } catch (xpErr) {
+          console.error("[handleRewardEarned] Failed to persist XP:", xpErr);
+        }
+      }
+
+      // 3. Update local React state AFTER successful DB update
+      setUserProfile((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          balance_coins: newBalance,
+          balance_usd: newBalance / 1000,
+          total_earned_coins: newTotalEarned,
+          level: newLevel,
+          xp: newXp,
+        };
+      });
+
+      // 4. Sound + notification ONLY after successful wallet update
+      playCoinSound();
+      addNotification(
+        `${coins.toLocaleString()} Coins Earned!`,
+        finalMessage,
+        "credit",
+        coins,
+        sourceName
+      );
+
+      // 5. Level-up check
+      const oldLevel = prevLevelRef.current;
+      if (newLevel > oldLevel) {
+        setLevelUpLevel(newLevel);
+        setShowLevelUp(true);
+        prevLevelRef.current = newLevel;
+      }
+
+      // 6. Update live feed
+      setLiveEarnerFeed(prev => [
+        { id: `fe-${Math.random()}`, user: usernameRef.current, provider: sourceName, coins },
+        ...prev.slice(0, 9)
+      ]);
+      const newAct: ActivityFeedItem = {
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        username: usernameRef.current,
+        activityType: "earning",
+        provider: sourceName,
+        coins,
+        message: "",
+        createdAt: new Date().toISOString(),
       };
-      if (xpGained) dbUpd.xp = newXp;
-      dbUserId = prev.id;
-      return {
-        ...prev,
-        balance_coins: newCoins,
-        balance_usd: newCoins / 1000,
-        total_earned_coins: newTotalEarned,
-        level: newLevel,
-        xp: newXp,
-      };
-    });
+      setActivityFeed(prev => {
+        const updated = filterFeedBySettings([newAct, ...prev], tickerSettings);
+        saveFeed(updated);
+        return updated;
+      });
 
-    playCoinSound();
-
-    addNotification(
-      `${coins.toLocaleString()} Coins Earned!`,
-      finalMessage,
-      "credit",
-      coins,
-      sourceName
-    );
-
-    // Persist to Supabase using values computed from the functional updater
-    if (dbUpd && dbUserId) {
-      updateProfile(dbUserId, dbUpd).catch(() => {});
+    } catch (err) {
+      console.error("[handleRewardEarned] Failed to process reward:", err);
+      // NOTIFICATION IS NOT SHOWN — wallet update failed, so we don't deceive the user
     }
-
-    // Level-up check using computed newLevel
-    const oldLevel = prevLevelRef.current;
-    if (newLevel > oldLevel) {
-      setLevelUpLevel(newLevel);
-      setShowLevelUp(true);
-      prevLevelRef.current = newLevel;
-    }
-
-    // Update live feed
-    setLiveEarnerFeed(prev => [
-      { id: `fe-${Math.random()}`, user: usernameRef.current, provider: sourceName, coins },
-      ...prev.slice(0, 9)
-    ]);
-    // Also add to activity feed
-    const newAct: ActivityFeedItem = {
-      id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      username: usernameRef.current,
-      activityType: "earning",
-      provider: sourceName,
-      coins,
-      message: "",
-      createdAt: new Date().toISOString(),
-    };
-    setActivityFeed(prev => {
-      const updated = filterFeedBySettings([newAct, ...prev], tickerSettings);
-      saveFeed(updated);
-      return updated;
-    });
-
   }, [setUserProfile, addNotification, supabase, tickerSettings]);
 
   // ── Rotate activity ticker ──
@@ -952,10 +964,7 @@ export default function App() {
   if (!sessionLoaded) {
     return (
       <div className="w-full min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
-          <span className="text-[10px] font-mono text-slate-500">Loading...</span>
-        </div>
+        <Loader size="lg" text="Loading" />
       </div>
     );
   }
@@ -1404,9 +1413,8 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-center sm:justify-start gap-2 font-mono text-[10px] text-slate-500">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0" />
-                    <span>Live feed loading...</span>
+                  <div className="flex items-center justify-center sm:justify-start">
+                    <Loader size="xs" text="Live feed loading" />
                   </div>
                 )}
               </div>

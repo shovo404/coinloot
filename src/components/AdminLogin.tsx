@@ -1,5 +1,6 @@
 import { useState, FormEvent } from "react";
 import { ShieldCheck, Eye, EyeOff } from "lucide-react";
+import Loader from "./Loader";
 
 interface AdminLoginProps {
   onLogin: (email: string) => void;
@@ -101,7 +102,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
               className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 hover:shadow-xl hover:shadow-cyan-500/30 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <Loader size="xs" />
               ) : (
                 "Sign In"
               )}

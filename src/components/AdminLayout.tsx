@@ -5,7 +5,7 @@ import {
   Coins, Award, Activity, Globe, Server, Menu, X, User as UserIcon,
   PanelRightClose, PanelRight, RefreshCw, ShieldCheck, ChevronLeft,
   MessageSquare, UserPlus, ExternalLink, Check,
-  AlertTriangle,
+  AlertTriangle, Megaphone,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { AppNotification } from "./Navbar";
@@ -35,10 +35,10 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "offer-management", label: "Offer Management", icon: Activity },
   { id: "coins", label: "Coins & Rewards", icon: Coins },
   { id: "withdrawals", label: "Withdrawals", icon: Wallet },
-  { id: "promos", label: "Promo Codes", icon: Gift },
   { id: "referrals", label: "Referrals", icon: Link2 },
   { id: "tickets", label: "Tickets", icon: MessageSquare },
   { id: "homepage", label: "Homepage", icon: Globe },
+  { id: "announcements-promos", label: "Announcements & Promo Codes", icon: Megaphone },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "rewards-challenges", label: "Rewards & Challenges", icon: Award },
   { id: "kyc", label: "KYC", icon: ShieldCheck },

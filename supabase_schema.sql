@@ -565,6 +565,64 @@ create table if not exists public.promo_code_redemptions (
   unique(promo_code_id, user_id)
 );
 
+-- 9b2. Announcements
+create table if not exists public.announcements (
+  id uuid default uuid_generate_v4() primary key,
+  title text not null,
+  message text not null,
+  is_active boolean default true,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 9b3. Social Bounty Campaigns
+create table if not exists public.social_campaigns (
+  id uuid default uuid_generate_v4() primary key,
+  title text not null,
+  description text,
+  icon text default '🎯',
+  reward_coins integer not null default 0,
+  completion_mode text not null default 'all' check (completion_mode in ('all', 'any')),
+  max_screenshots integer default 5,
+  required_level integer default 1,
+  is_active boolean default true,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table if not exists public.campaign_tasks (
+  id uuid default uuid_generate_v4() primary key,
+  campaign_id uuid references public.social_campaigns(id) on delete cascade not null,
+  task_title text not null,
+  task_description text,
+  reward_coins integer not null default 0,
+  sort_order integer default 0,
+  is_active boolean default true,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table if not exists public.campaign_submissions (
+  id uuid default uuid_generate_v4() primary key,
+  campaign_id uuid references public.social_campaigns(id) on delete cascade not null,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  admin_notes text,
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamp with time zone,
+  total_reward integer default 0,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table if not exists public.campaign_submission_screenshots (
+  id uuid default uuid_generate_v4() primary key,
+  submission_id uuid references public.campaign_submissions(id) on delete cascade not null,
+  screenshot_url text not null,
+  uploaded_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- ════════════════════════════════════════════════════════════════════
 -- 9c. KYC Records
 -- ════════════════════════════════════════════════════════════════════
@@ -1292,8 +1350,13 @@ alter table public.achievement_rewards enable row level security;
 alter table public.leaderboard_statistics enable row level security;
 alter table public.support_tickets enable row level security;
 alter table public.ticket_replies enable row level security;
+alter table public.announcements enable row level security;
 alter table public.site_settings enable row level security;
 alter table public.api_integrations enable row level security;
+alter table public.social_campaigns enable row level security;
+alter table public.campaign_tasks enable row level security;
+alter table public.campaign_submissions enable row level security;
+alter table public.campaign_submission_screenshots enable row level security;
 
 -- ── Drop all policies first so they can be safely recreated ──
 -- Safely drop all existing policies (with table existence check)
@@ -1354,8 +1417,10 @@ drop policy if exists "Admins manage all tickets" on public.support_tickets;
 drop policy if exists "Users view own ticket replies" on public.ticket_replies;
 drop policy if exists "Users create ticket replies" on public.ticket_replies;
 drop policy if exists "Admins manage all replies" on public.ticket_replies;
+drop policy if exists "Anyone can view active announcements" on public.announcements;
+drop policy if exists "Admins manage announcements" on public.announcements;
 drop policy if exists "Anyone can view site settings" on public.site_settings;
-drop policy if exists "Admins update site settings" on public.site_settings;
+drop policy if exists "Admins manage site settings" on public.site_settings;
 drop policy if exists "Admins manage API integrations" on public.api_integrations;
 drop policy if exists "Anyone can view level definitions" on public.user_levels;
 drop policy if exists "Admins manage levels" on public.user_levels;
@@ -1364,6 +1429,16 @@ drop policy if exists "Admins view status history" on public.offerwall_status_hi
 drop policy if exists "Users view own balance" on public.user_balances;
 drop policy if exists "Admins view all balances" on public.user_balances;
 drop policy if exists "Users view own verifications" on public.email_verifications;
+drop policy if exists "Anyone can view active campaigns" on public.social_campaigns;
+drop policy if exists "Admins manage campaigns" on public.social_campaigns;
+drop policy if exists "Anyone can view campaign tasks" on public.campaign_tasks;
+drop policy if exists "Admins manage campaign tasks" on public.campaign_tasks;
+drop policy if exists "Users view own submissions" on public.campaign_submissions;
+drop policy if exists "Users create submissions" on public.campaign_submissions;
+drop policy if exists "Admins manage all submissions" on public.campaign_submissions;
+drop policy if exists "Users view own screenshots" on public.campaign_submission_screenshots;
+drop policy if exists "Users upload screenshots" on public.campaign_submission_screenshots;
+drop policy if exists "Admins manage screenshots" on public.campaign_submission_screenshots;
 
 -- ── Recreate all policies ──
 
@@ -1505,9 +1580,9 @@ create policy "Admins manage promo codes" on public.promo_codes
 drop policy if exists "Users view own redemptions" on public.promo_code_redemptions;
 create policy "Users view own redemptions" on public.promo_code_redemptions
   for select using (auth.uid() = user_id);
-drop policy if exists "Authenticated users can redeem" on public.promo_code_redemptions;
-create policy "Authenticated users can redeem" on public.promo_code_redemptions
-  for insert with check (auth.role() = 'authenticated');
+drop policy if exists "Users can redeem promo codes" on public.promo_code_redemptions;
+create policy "Users can redeem promo codes" on public.promo_code_redemptions
+  for insert with check (auth.uid() = user_id);
 
 -- REFERRAL LINKS
 drop policy if exists "Users view own referral link" on public.referral_links;
@@ -1603,13 +1678,21 @@ drop policy if exists "Admins manage all replies" on public.ticket_replies;
 create policy "Admins manage all replies" on public.ticket_replies
   for all using (public.fn_is_admin());
 
+-- ANNOUNCEMENTS
+drop policy if exists "Anyone can view active announcements" on public.announcements;
+create policy "Anyone can view active announcements" on public.announcements
+  for select using (true);
+drop policy if exists "Admins manage announcements" on public.announcements;
+create policy "Admins manage announcements" on public.announcements
+  for all using (public.fn_is_admin());
+
 -- SITE SETTINGS
 drop policy if exists "Anyone can view site settings" on public.site_settings;
 create policy "Anyone can view site settings" on public.site_settings
   for select using (true);
-drop policy if exists "Admins update site settings" on public.site_settings;
-create policy "Admins update site settings" on public.site_settings
-  for update using (public.fn_is_admin());
+drop policy if exists "Admins manage site settings" on public.site_settings;
+create policy "Admins manage site settings" on public.site_settings
+  for all using (public.fn_is_admin());
 
 -- API INTEGRATIONS (sensitive - admins only)
 drop policy if exists "Admins manage API integrations" on public.api_integrations;
@@ -1647,6 +1730,44 @@ drop policy if exists "Users view own verifications" on public.email_verificatio
 create policy "Users view own verifications" on public.email_verifications
   for select using (auth.uid() = user_id);
 
+-- SOCIAL BOUNTY CAMPAIGNS
+drop policy if exists "Anyone can view active campaigns" on public.social_campaigns;
+create policy "Anyone can view active campaigns" on public.social_campaigns
+  for select using (is_active = true or public.fn_is_admin());
+drop policy if exists "Admins manage campaigns" on public.social_campaigns;
+create policy "Admins manage campaigns" on public.social_campaigns
+  for all using (public.fn_is_admin());
+
+-- CAMPAIGN TASKS
+drop policy if exists "Anyone can view campaign tasks" on public.campaign_tasks;
+create policy "Anyone can view campaign tasks" on public.campaign_tasks
+  for select using (true);
+drop policy if exists "Admins manage campaign tasks" on public.campaign_tasks;
+create policy "Admins manage campaign tasks" on public.campaign_tasks
+  for all using (public.fn_is_admin());
+
+-- CAMPAIGN SUBMISSIONS
+drop policy if exists "Users view own submissions" on public.campaign_submissions;
+create policy "Users view own submissions" on public.campaign_submissions
+  for select using (auth.uid() = user_id or public.fn_is_admin());
+drop policy if exists "Users create submissions" on public.campaign_submissions;
+create policy "Users create submissions" on public.campaign_submissions
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "Admins manage all submissions" on public.campaign_submissions;
+create policy "Admins manage all submissions" on public.campaign_submissions
+  for all using (public.fn_is_admin());
+
+-- CAMPAIGN SUBMISSION SCREENSHOTS
+drop policy if exists "Users view own screenshots" on public.campaign_submission_screenshots;
+create policy "Users view own screenshots" on public.campaign_submission_screenshots
+  for select using (exists (select 1 from public.campaign_submissions where id = submission_id and user_id = auth.uid()) or public.fn_is_admin());
+drop policy if exists "Users upload screenshots" on public.campaign_submission_screenshots;
+create policy "Users upload screenshots" on public.campaign_submission_screenshots
+  for insert with check (exists (select 1 from public.campaign_submissions where id = submission_id and user_id = auth.uid()));
+drop policy if exists "Admins manage screenshots" on public.campaign_submission_screenshots;
+create policy "Admins manage screenshots" on public.campaign_submission_screenshots
+  for all using (public.fn_is_admin());
+
 
 -- ════════════════════════════════════════════════════════════════════
 -- SUPABASE REALTIME (Instant Updates)
@@ -1661,7 +1782,7 @@ declare
     'coin_transactions', 'withdrawals', 'offerwalls', 'offerwall_providers',
     'earnings_history', 'promo_codes', 'admin_activity_logs', 'admin_accounts',
     'referral_earnings', 'referral_links', 'withdrawal_methods', 'site_settings',
-    'support_tickets'
+    'support_tickets', 'announcements'
   ];
 begin
   foreach tbl in array tables_to_add loop
@@ -1721,6 +1842,7 @@ insert into public.site_settings (setting_key, setting_value, setting_type, desc
   ('maintenance_mode', 'false', 'boolean', 'Enable maintenance mode'),
   ('leaderboard_daily_reset', 'true', 'boolean', 'Auto-reset daily leaderboard'),
   ('fraud_detection_enabled', 'true', 'boolean', 'Enable VPN/proxy detection'),
+  ('homepage_sections', '{"featured":true,"hot":true,"surveys":true,"offerwalls":true,"announcements":true,"promo_cards":true,"rewards":true,"challenges":true}', 'string', 'Homepage section visibility toggles'),
   ('enable_demo_data', 'false', 'boolean', 'Enable demo/test user accounts (for development only)')
 on conflict (setting_key) do nothing;
 
@@ -2347,3 +2469,4 @@ grant all on all functions in schema public to anon, authenticated, service_role
 -- ====================================================================
 -- END OF SCHEMA
 -- ====================================================================
+
