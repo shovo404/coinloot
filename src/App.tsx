@@ -513,6 +513,22 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const prevNotifIdsRef = useRef<Set<string>>(new Set());
 
+  // One-time cleanup of stale broadcast notifications (from old tests/demo data)
+  useEffect(() => {
+    try {
+      const stored: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+      if (Array.isArray(stored)) {
+        const cleaned = stored.filter((n: any) => {
+          const isStaleBroadcast = (n.title === "📢 Announcement" || n.title === "🎉 Promo Event") && n.description?.trim()?.length < 20;
+          return !isStaleBroadcast;
+        });
+        if (cleaned.length < stored.length) {
+          localStorage.setItem("coinloot_notifications", JSON.stringify(cleaned));
+        }
+      }
+    } catch {}
+  }, []);
+
   const loadNotifications = useCallback(() => {
     if (!userProfile) {
       setNotifications([]);
@@ -678,6 +694,14 @@ export default function App() {
       const { newBalance, newTotalEarned } = result;
       const newLevel = calcLevel(newTotalEarned);
       const newXp = xpGained ? (profile.xp || 0) + xpGained : (profile.xp || 0);
+
+      // Notify admin of significant earnings
+      if (coins >= 100) {
+        try {
+          const { createAdminNotification } = await import("./utils/adminNotifier");
+          createAdminNotification("high_value_reward", "🏆 Offer Completed", `User: ${profile.username}\nProvider: ${sourceName}\nCoins: ${coins.toLocaleString()}${xpGained ? `\nXP: +${xpGained}` : ""}`, profile.id, profile.username, { related_id: "", coins, sourceName });
+        } catch {}
+      }
 
       // 2. Also persist XP to DB (addCoins doesn't handle XP)
       if (xpGained) {

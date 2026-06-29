@@ -41,3 +41,42 @@
 - **Before**: `calcLevel(balance_coins)` — level based on current wallet balance (would decrease on withdrawal)
 - **After**: `calcLevel(total_earned_coins)` — level based on lifetime earnings (never decreases)
 - This is consistent with how `addCoins()` already calculated level internally
+
+## 2026-06-29 — Notification System Cleanup & Admin Routing + Mobile Responsiveness
+
+### Notification Fixes
+- **Unwanted notifications removed** — Added one-time cleanup in `App.tsx` that filters out stale broadcast notifications ("📢 Announcement" / "🎉 Promo Event" with short descriptions) from localStorage on boot. This prevents old test broadcasts like "Hi" from persisting.
+
+- **Admin notification routing** — All user actions now generate admin notifications via `createAdminNotification()`:
+
+| User Action | Admin Notification | File |
+|---|---|---|
+| KYC submitted | 🪪 KYC Submitted | `kycEngine.ts` |
+| Support ticket created | 🎫 New Support Ticket | `SupportTicket.tsx` |
+| Social bounty submitted | 🎯 Campaign Submitted | `supabaseService.ts` |
+| Offer completed | 🏆 Offer Completed (>100 coins) | `App.tsx` |
+| User registered | 🆕 New User Registration | `AuthModal.tsx` |
+| Promo code redeemed | 🎁 Promo Code Redeemed | `supabaseService.ts` |
+| Withdrawal requested | 💰 New Withdrawal Request | `WithdrawHub.tsx` *(already wired)* |
+
+- **Notification routing separation** — User notifications go through `addNotification()`/`addUserNotification()` (localStorage + Supabase `notifications` table). Admin notifications go through `createAdminNotification()` (localStorage + API POST). No cross-contamination.
+
+### Mobile Responsiveness
+- Added comprehensive mobile CSS in `index.css` targeting:
+  - All viewport widths (320px, 375px, 390px, 414px, tablets, desktop)
+  - Page wrapper padding responsive
+  - Table horizontal scroll
+  - Modal bottom-sheet behavior on mobile
+  - Touch target minimum sizes (44px)
+  - Text overflow prevention (`overflow-wrap: break-word`)
+  - Grid column reduction on tablet
+  - Card padding reduction on tiny screens
+  - Notification panel full-width on mobile
+
+### Files Modified
+- `src/App.tsx` — Stale broadcast notification cleanup; admin notification for offer completions
+- `src/utils/kycEngine.ts` — Admin notification on KYC submission
+- `src/components/SupportTicket.tsx` — Admin notification on ticket creation
+- `src/lib/supabaseService.ts` — Admin notification on campaign submission and promo code redemption
+- `src/components/AuthModal.tsx` — Admin notification on new user registration
+- `src/index.css` — Comprehensive mobile responsive CSS

@@ -189,6 +189,148 @@ html, body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   COMPREHENSIVE MOBILE RESPONSIVE FIXES
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 767px) {
+  /* Ensure all page wrappers have proper padding */
+  .max-w-7xl {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Fix horizontal overflow on cards and grids */
+  .grid {
+    max-width: 100vw;
+  }
+
+  /* Responsive tables */
+  table, .table-container {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Fix modal overflow */
+  .fixed.inset-0.z-50 {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Ensure dropdowns don't escape viewport */
+  .absolute.right-0 {
+    right: 0;
+    left: auto;
+  }
+
+  /* Fix notification panel width on mobile */
+  .glass-notification {
+    width: calc(100vw - 1rem) !important;
+    max-width: calc(100vw - 1rem) !important;
+  }
+
+  /* Better card spacing */
+  .rounded-2xl, .rounded-3xl {
+    word-break: break-word;
+  }
+
+  /* Prevent text overflow in cards */
+  .line-clamp-2 {
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+  }
+
+  .line-clamp-1 {
+    -webkit-line-clamp: 1;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+  }
+
+  /* Ensure buttons have minimum touch target */
+  button, a, [role="button"] {
+    min-height: 36px;
+  }
+
+  /* Fix admin panel layout on small screens */
+  .grid-cols-1\\.5, .grid-cols-2\\.5 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Prevent long unbroken strings from breaking layout */
+  * {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+  }
+
+  /* Fix modal positioning on mobile */
+  .fixed.flex.items-center.justify-center {
+    align-items: flex-end;
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+
+  /* Sheet-like modals on mobile */
+  .fixed.flex.items-center.justify-center > div[class*="rounded-2xl"],
+  .fixed.flex.items-center.justify-center > div[class*="rounded-xl"] {
+    width: calc(100% - 1rem) !important;
+    max-height: 85vh !important;
+    overflow-y: auto !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+  }
+
+  /* Bottom sheet for withdraw/claim modals */
+  .fixed.inset-0.z-50.flex.items-end {
+    align-items: flex-end !important;
+  }
+
+  .fixed.inset-0.z-50.flex.items-end > div {
+    width: 100% !important;
+    max-height: 90vh !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+  }
+}
+
+/* Tablet fixes */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .max-w-7xl {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+  
+  /* Medium screens: show 3-4 columns instead of 5-6 */
+  .lg\\:grid-cols-5, .xl\\:grid-cols-6 {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Small phone fixes */
+@media (max-width: 380px) {
+  .max-w-7xl {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+  
+  /* Reduce card padding on tiny screens */
+  .p-4 {
+    padding: 0.75rem !important;
+  }
+  
+  .p-5 {
+    padding: 0.75rem !important;
+  }
+  
+  /* Ensure grids don't overflow */
+  .grid-cols-2 {
+    gap: 0.5rem !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    LIGHT MODE SUPPORT
    ═══════════════════════════════════════════════════════════════════════ */
 

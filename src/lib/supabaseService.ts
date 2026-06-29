@@ -425,6 +425,13 @@ export async function validatePromoCode(code: string, userId: string): Promise<P
 
     await sb.from("promo_codes").update({ current_uses: promo.current_uses + 1 }).eq("id", promo.id);
     try { await addCoins(userId, promo.coins, "PROMO_REWARD", `Promo: ${code}`, `Promo code ${code} redeemed for ${promo.coins} coins`); } catch {}
+    try {
+      const { notifyRegistration } = await import("../utils/adminNotifier");
+      const profile = await getProfile(userId);
+      const username = profile?.username || userId;
+      const { createAdminNotification } = await import("../utils/adminNotifier");
+      createAdminNotification("high_value_reward", "🎁 Promo Code Redeemed", `User: ${username}\nCode: ${code}\nCoins: ${promo.coins}`, userId, username, { related_id: code, coins: promo.coins });
+    } catch {}
     return { success: true, promo, coins: promo.coins };
   }
 
@@ -770,6 +777,11 @@ export async function submitCampaign(campaignId: string, userId: string, screens
     const { error: ssError } = await sb.from("campaign_submission_screenshots").insert(screenshotRows);
     if (ssError) throw ssError;
   }
+
+  try {
+    const { createAdminNotification } = await import("../utils/adminNotifier");
+    createAdminNotification("offer_completed", "🎯 Campaign Submitted", `User submitted campaign "${campaign.title}" for review.`, userId, userId, { related_id: submission.id, campaignId });
+  } catch {}
 
   return submission;
 }

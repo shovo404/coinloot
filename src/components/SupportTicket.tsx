@@ -143,6 +143,9 @@ export default function SupportTicket({ user, setUser }: SupportTicketProps) {
     setActiveTicket(ticket);
     setMessages([initialMessage]);
     setView("chat");
+    try {
+      import("../utils/adminNotifier").then(m => m.createAdminNotification("new_ticket", "🎫 New Support Ticket", `User: ${user.username}\nSubject: ${newSubject}\nCategory: ${newCategory}`, user.id, user.username, { related_id: ticket.id, subject: newSubject }));
+    } catch {}
   };
 
   const openChat = (ticket: Ticket) => {

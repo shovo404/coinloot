@@ -165,6 +165,10 @@ export async function submitKyc(input: KycSubmissionInput): Promise<KycRecord> {
 
   try { updateUserKycStatus(input.userId, "PENDING"); } catch {}
   try { addLog(record.id, input.userId, "SUBMITTED", input.username, "KYC documents submitted"); } catch {}
+  try {
+    const { createAdminNotification } = await import("./adminNotifier");
+    createAdminNotification("verification_request", "🪪 KYC Submitted", `User: ${input.username}\nType: ${input.docType}\nCountry: ${input.country}`, input.userId, input.username, { related_id: record.id, docType: input.docType });
+  } catch {}
 
   return record;
 }
