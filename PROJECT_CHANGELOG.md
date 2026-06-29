@@ -1,5 +1,64 @@
 # Project Changelog
 
+## 2026-06-30 — MetReward-Style Offer System Redesign
+
+### Added
+- **`src/utils/offerData.ts`** — Dynamic offer data source architecture with:
+  - Demo featured/hot offers with real game-like thumbnails, milestone steps, rewards
+  - `OfferSource` interface for future API provider registration
+  - Placeholder functions for future API integration (TOROX, AdGem, AdGate, Lootably, etc.)
+  - When API sources are configured, offers automatically replace demo data
+- **`src/components/OfferCard.tsx`** — MetReward-style compact card component:
+  - Fixed 190-210px width horizontal scroll card
+  - Large 4:3 aspect ratio game thumbnail at top
+  - Provider badge on image, reward badge overlay
+  - "UP TO X" badge for multi-step rewards
+  - Title (2-line clamp), description (1-line clamp)
+  - "View Offer" button on hover with scale effect
+  - Dark premium theme with hover glow
+- **New offer data structure**: Each offer supports `title`, `description`, `imageUrl`, `reward`, `provider`, `offer_url`, plus `steps[]` with milestone rewards
+
+### Modified
+- **`src/components/EarnPage.tsx`**:
+  - Featured/Hot offer sections redesigned: grid layout → `HorizontalScroll` with `OfferCard`
+  - Removed old inline offer detail modal (simple single-reward view)
+  - Removed unused `handleLaunchOffer`/`completeOfferSimulator` usage for Hot offers (now unified through `viewingOfferDetails` → `OfferDetailsModal`)
+  - Added offer count badges to section headers
+- **`src/components/OfferDetailsModal.tsx`** — Complete MetReward-style redesign:
+  - Full-width 16:9 cover image at top with gradient overlay
+  - Provider badge + platform badge (Mobile/Cross-Platform) overlaid on image
+  - Reward badge with total reward on image
+  - "How to Earn" section with numbered milestone steps (e.g. "1. Complete Level 10 → +100 Coins")
+  - Each step has "Claim" button (when offer is started)
+  - Completed steps shown with green checkmark + strikethrough
+  - Total Reward card with amber gradient, progress bar
+  - "Start Offer" CTA button → opens tracking link, enables step claiming
+  - "All Rewards Claimed" state when all steps completed
+  - No tabs, no activity feed, no QR code, no support form in main flow
+  - Clean single-column layout matching MetReward style
+- **`PROJECT_CHANGELOG.md`** — This entry
+
+### Not Changed
+- Wallet, Rewards, Notifications, Withdrawals, Referrals, User Accounts kept intact
+- Existing offerwall provider system, admin offers, API offer fetching preserved
+- `Offer` type in `types/index.ts` unchanged (already had `steps?`, `max_reward?`, `tracking_link?`)
+
+## 2026-06-30 — Forgot Password Feature
+
+### Added
+- **"Forgot Password?" link** on the Sign In form below the password field
+- **3-step forgot password flow** inside AuthModal:
+  1. **Email step** — user enters registered email, admin fallback notice shown
+  2. **OTP step** — 6-digit code verification with 10-minute expiry, resend with 30s cooldown
+  3. **New Password step** — set new password with confirmation, auto-login on success
+- **OTP-based reset system** — stores OTP in localStorage with expiry, marks used after verification
+- **Rate limiting** — max 3 OTP requests per email per hour, tracked in localStorage
+- **Admin fallback messaging** — notice in forgot password UI directing users to contact support or use admin panel
+- **Activity logging** — password reset via forgot flow logged to `coinloot_admin_logs` as `PASSWORD_CHANGED`
+
+### Modified
+- `src/components/AuthModal.tsx` — Added forgot password state variables, handlers, and 3 UI views; updated header subtitle; added Forgot Password link
+
 ## 2026-06-29 — Critical Reward Flow Fix
 
 ### Root Cause

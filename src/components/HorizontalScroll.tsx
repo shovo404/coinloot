@@ -4,10 +4,12 @@ interface HorizontalScrollProps {
   children: ReactNode;
   className?: string;
   snap?: boolean;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-export default function HorizontalScroll({ children, className = "", snap = false }: HorizontalScrollProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export default function HorizontalScroll({ children, className = "", snap = false, containerRef: externalRef }: HorizontalScrollProps) {
+  const internalRef = useRef<HTMLDivElement>(null);
+  const containerRef = externalRef || internalRef;
   const isDragging = useRef(false);
   const startX = useRef(0);
   const scrollLeft = useRef(0);

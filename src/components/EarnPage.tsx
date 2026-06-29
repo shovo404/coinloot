@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ShieldCheck, Zap, Coins,
   Star, Lock, ArrowUpRight, Info,
   Play, BarChart3, Flame,
   Crown, Megaphone, Gift, Clock, Copy, CheckCircle, Flag, Upload, ExternalLink,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import Loader from "./Loader";
 import { UserProfile, Offer } from "../types";
 import { isUserRestricted, checkVpnStatus, getVpnSettings, logDetection } from "../utils/vpnDetector";
 import { getActiveCampaigns, getCampaignWithTasks, getUserCampaignSubmissions, submitCampaign } from "../lib/supabaseService";
 import { getProviderInfo, getProviderLogoUrl, getAllProviders } from "../utils/providerLogos";
+import { getFeaturedOffers, getHotOffers } from "../utils/offerData";
 import OfferwallCard from "./OfferwallCard";
 import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getConnectedProviders, fetchOffersFromProvider } from "../utils/fetchOfferwallOffers";
@@ -20,6 +22,7 @@ import VpnBlockPopup from "./VpnBlockPopup";
 import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
 import LockedOfferwallCard from "./LockedOfferwallCard";
 import OfferDetailsModal from "./OfferDetailsModal";
+import OfferCard from "./OfferCard";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 import { calcLevel } from "../utils/levelSystem";
 
@@ -54,23 +57,8 @@ const OFFERWALL_PROVIDERS = [
   "Monlix", "Wannads",
 ];
 
-const FALLBACK_FEATURED: Offer[] = [
-  { id: "ft-1", title: "TOROX Stellar Offerwall", description: "Browse high-paying offers from premium brands across the globe.", payout_coins: 5000, category: "trending", provider: "TOROX", imageUrl: "/logos/torox.png", difficulty: "Medium", link: "https://torox.com" },
-  { id: "ft-2", title: "Revenue Universe Crypto Offer", description: "Register and verify accounts on leading crypto platforms.", payout_coins: 7200, category: "high-paying", provider: "Revenue Universe", imageUrl: "/logos/revenueuniverse.png", difficulty: "Hard", link: "https://revenueuniverse.com" },
-  { id: "ft-3", title: "AdGate Galactic Rewards", description: "Try new apps, games, and services. Get rewarded for every action.", payout_coins: 3500, category: "trending", provider: "AdGate Media", imageUrl: "/logos/adgatemedia.png", difficulty: "Medium", link: "https://adgatemedia.com" },
-  { id: "ft-4", title: "AdGem Cosmic Install", description: "Install and try new mobile apps. Earn coins per install and session.", payout_coins: 2500, category: "new", provider: "AdGem", imageUrl: "/logos/adgem.png", difficulty: "Easy", link: "https://adgem.com" },
-  { id: "ft-5", title: "CPX Quantum Survey Matrix", description: "Answer advanced market research surveys on emerging technologies.", payout_coins: 1800, category: "trending", provider: "CPX Research", imageUrl: "/logos/cpxresearch.png", difficulty: "Medium", link: "https://cpxresearch.com" },
-  { id: "ft-6", title: "BitLabs Protocol Survey", description: "Complete tech-oriented surveys and earn premium rewards.", payout_coins: 1200, category: "trending", provider: "BitLabs", imageUrl: "/logos/bitlabs.png", difficulty: "Easy", link: "https://bitlabs.ai" },
-];
-
-const FALLBACK_HOT: Offer[] = [
-  { id: "hot-1", title: "Lootably Nebula Tasks", description: "Complete micro-tasks and quick offers for instant coin rewards.", payout_coins: 800, category: "recommended", provider: "Lootably", imageUrl: "/logos/lootably.png", difficulty: "Easy", link: "https://lootably.com" },
-  { id: "hot-2", title: "TimeWall Daily Videos", description: "Watch short videos and complete daily check-ins for coins.", payout_coins: 350, category: "new", provider: "TimeWall", imageUrl: "/logos/timewall.png", difficulty: "Easy", link: "https://timewall.io" },
-  { id: "hot-3", title: "Ayet Studios App Install", description: "Download and play featured mobile games. Reach level milestones.", payout_coins: 1500, category: "recommended", provider: "Ayet Studios", imageUrl: "/logos/ayetstudios.png", difficulty: "Medium", link: "https://ayetstudios.com" },
-  { id: "hot-4", title: "Kiwi Wall Offer Grid", description: "Browse the kiwi wall and complete simple offers for coins.", payout_coins: 1000, category: "recommended", provider: "Kiwi Wall", imageUrl: "/logos/kiwiwall.png", difficulty: "Easy", link: "https://kiwiwall.com" },
-  { id: "hot-5", title: "Monlix Survey Panel", description: "Join Monlix's survey panel and earn coins for your opinions.", payout_coins: 2000, category: "recommended", provider: "Monlix", imageUrl: "/logos/monlix.png", difficulty: "Medium", link: "https://monlix.com" },
-  { id: "hot-6", title: "Wannads Offer Exchange", description: "Complete Wannads offers from global advertisers. Instant credit.", payout_coins: 1600, category: "trending", provider: "Wannads", imageUrl: "/logos/wannads.png", difficulty: "Easy", link: "https://wannads.com" },
-];
+const FALLBACK_FEATURED = getFeaturedOffers();
+const FALLBACK_HOT = getHotOffers();
 
 function evaluateLockRules(user: UserProfile, rules: LockRule[]): { locked: boolean; reason: string } {
   for (const rule of rules) {
@@ -118,6 +106,15 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const [campaignModal, setCampaignModal] = useState<any>(null);
   const [campaignModalTasks, setCampaignModalTasks] = useState<any[]>([]);
   const [submittingCampaign, setSubmittingCampaign] = useState(false);
+
+  const featuredScrollRef = useRef<HTMLDivElement>(null);
+  const hotScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollOffers = (ref: React.RefObject<HTMLDivElement | null>, direction: "left" | "right") => {
+    if (!ref.current) return;
+    const scrollAmount = 220;
+    ref.current.scrollBy({ left: direction === "left" ? -scrollAmount : scrollAmount, behavior: "smooth" });
+  };
 
   useEffect(() => {
     getActiveCampaigns().then(setSocialCampaigns);
@@ -345,55 +342,26 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
             <Crown className="w-4 h-4 text-amber-400" />
             Featured Offers
           </h2>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-mono text-slate-500 mr-1">{featuredOffers.length} offers</span>
+            <button onClick={() => scrollOffers(featuredScrollRef, "left")} className="p-1.5 rounded-lg bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:border-cyan-400/30 transition-all cursor-pointer">
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => scrollOffers(featuredScrollRef, "right")} className="p-1.5 rounded-lg bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:border-cyan-400/30 transition-all cursor-pointer">
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-          {featuredOffers.map((offer) => {
-            const providerInfo = getProviderInfo(offer.provider);
-            const color = providerInfo.color || "from-cyan-500 to-blue-600";
-            return (
-              <div key={offer.id} className="group relative rounded-xl bg-slate-950/60 border border-white/5 hover:border-cyan-400/30 hover:shadow-[0_0_20px_rgba(6,182,212,0.08)] transition-all duration-300 overflow-hidden">
-                {/* Image */}
-                <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
-                  <img
-                    src={offer.imageUrl}
-                    alt={offer.title}
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      img.style.display = "none";
-                      const fallback = img.nextElementSibling;
-                      if (fallback) fallback.classList.remove("hidden");
-                    }}
-                  />
-                  <div className={`absolute inset-0 bg-gradient-to-br ${color} flex items-center justify-center hidden`}>
-                    <span className="text-lg font-bold text-white/80">{providerInfo.initials}</span>
-                  </div>
-                  <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm border border-white/5">
-                    <span className="text-[8px] font-bold text-cyan-300 flex items-center gap-0.5">
-                      <Coins className="w-2 h-2" /> {offer.payout_coins.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-                {/* Content */}
-                <div className="p-2.5 space-y-1.5">
-                  <h3 className="text-[11px] font-bold text-white group-hover:text-cyan-300 transition-colors leading-tight line-clamp-2">{offer.title}</h3>
-                  <p className="text-[8px] text-slate-500 leading-snug line-clamp-1">{offer.description}</p>
-                  {isRestricted ? (
-                    <div className="w-full py-1 rounded-lg bg-slate-800/60 text-slate-500 text-[8px] font-semibold text-center border border-white/5 cursor-not-allowed flex items-center justify-center gap-1">
-                      <Lock className="w-2 h-2" /> Restricted
-                    </div>
-                  ) : (
-                    <button onClick={() => setViewingOfferDetails(offer)} className="w-full py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-[8px] font-bold tracking-wide hover:scale-[1.02] transition-all cursor-pointer">
-                      View Offer
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <HorizontalScroll snap containerRef={featuredScrollRef}>
+          {featuredOffers.map((offer) => (
+            <OfferCard
+              key={offer.id}
+              offer={offer}
+              isRestricted={isRestricted}
+              onClick={(o) => setViewingOfferDetails(o)}
+            />
+          ))}
+        </HorizontalScroll>
       </div>
       )}
 
@@ -405,55 +373,26 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
             <Flame className="w-4 h-4 text-orange-400" />
             Hot Offers
           </h2>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-mono text-slate-500 mr-1">{hotOffers.length} offers</span>
+            <button onClick={() => scrollOffers(hotScrollRef, "left")} className="p-1.5 rounded-lg bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:border-orange-400/30 transition-all cursor-pointer">
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => scrollOffers(hotScrollRef, "right")} className="p-1.5 rounded-lg bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:border-orange-400/30 transition-all cursor-pointer">
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-          {hotOffers.map((offer) => {
-            const providerInfo = getProviderInfo(offer.provider);
-            const color = providerInfo.color || "from-cyan-500 to-blue-600";
-            return (
-              <div key={offer.id} className="group relative rounded-xl bg-slate-950/60 border border-white/5 hover:border-orange-400/30 hover:shadow-[0_0_20px_rgba(251,146,60,0.08)] transition-all duration-300 overflow-hidden">
-                {/* Image */}
-                <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
-                  <img
-                    src={offer.imageUrl}
-                    alt={offer.title}
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      img.style.display = "none";
-                      const fallback = img.nextElementSibling;
-                      if (fallback) fallback.classList.remove("hidden");
-                    }}
-                  />
-                  <div className={`absolute inset-0 bg-gradient-to-br ${color} flex items-center justify-center hidden`}>
-                    <span className="text-lg font-bold text-white/80">{providerInfo.initials}</span>
-                  </div>
-                  <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm border border-white/5">
-                    <span className="text-[8px] font-bold text-orange-300 flex items-center gap-0.5">
-                      <Coins className="w-2 h-2" /> {offer.payout_coins.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-                {/* Content */}
-                <div className="p-2.5 space-y-1.5">
-                  <h3 className="text-[11px] font-bold text-white group-hover:text-orange-300 transition-colors leading-tight line-clamp-2">{offer.title}</h3>
-                  <p className="text-[8px] text-slate-500 leading-snug line-clamp-1">{offer.description}</p>
-                  {isRestricted ? (
-                    <div className="w-full py-1 rounded-lg bg-slate-800/60 text-slate-500 text-[8px] font-semibold text-center border border-white/5 cursor-not-allowed flex items-center justify-center gap-1">
-                      <Lock className="w-2 h-2" /> Restricted
-                    </div>
-                  ) : (
-                    <button onClick={() => handleLaunchOffer(offer)} className="w-full py-1.5 rounded-lg bg-slate-900 border border-white/5 text-slate-200 hover:bg-gradient-to-r hover:from-orange-500 hover:to-pink-600 hover:text-white hover:border-transparent text-[8px] font-bold tracking-wide transition-all cursor-pointer">
-                      Launch
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <HorizontalScroll snap containerRef={hotScrollRef}>
+          {hotOffers.map((offer) => (
+            <OfferCard
+              key={offer.id}
+              offer={offer}
+              isRestricted={isRestricted}
+              onClick={(o) => setViewingOfferDetails(o)}
+            />
+          ))}
+        </HorizontalScroll>
       </div>
       )}
 
@@ -649,59 +588,6 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
           onSubmit={handleCampaignSubmit}
           submitting={submittingCampaign}
         />
-      )}
-
-      {/* ═══════════════════ OFFER DETAIL MODAL ═══════════════════ */}
-      {viewingOffer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="max-w-md w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl">
-            <button onClick={() => setViewingOffer(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold font-mono cursor-pointer">✕</button>
-
-            <div className="flex items-center gap-4 pb-4 border-b border-white/5 mb-4">
-              <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center p-1 overflow-hidden">
-                <img src={viewingOffer.imageUrl || ""} alt={viewingOffer.provider} loading="lazy" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-              </div>
-              <div>
-                <span className="px-2 py-0.5 text-[8px] uppercase tracking-wider font-mono rounded bg-cyan-400/10 text-cyan-300 font-bold border border-cyan-400/20">
-                  {viewingOffer.provider}
-                </span>
-                <h2 className="font-sans font-bold text-lg text-white tracking-tight mt-1">{viewingOffer.title}</h2>
-              </div>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div>
-                <span className="block text-slate-500 uppercase font-mono text-[9px] mb-1">Details</span>
-                <p className="text-slate-300 leading-relaxed bg-slate-900/40 p-3 rounded-2xl border border-white/5">{viewingOffer.description}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-slate-900/40 p-3 rounded-2xl border border-white/5 text-center">
-                  <span className="block text-slate-500 uppercase font-mono text-[9px]">Duration</span>
-                  <span className="block text-xs font-semibold text-white mt-1">~10 min</span>
-                </div>
-                <div className="bg-slate-900/40 p-3 rounded-2xl border border-white/5 text-center">
-                  <span className="block text-slate-500 uppercase font-mono text-[9px]">Difficulty</span>
-                  <span className="block text-xs font-semibold text-cyan-400 mt-1">{viewingOffer.difficulty}</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-cyan-950/15 border border-cyan-500/20 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] uppercase font-mono tracking-wide text-cyan-300 block">Reward</span>
-                  <span className="text-base font-bold text-white block mt-0.5">{viewingOffer.payout_coins.toLocaleString()} Coins</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <a href={viewingOffer.link} target="_blank" rel="noreferrer" className="flex-1 py-3 text-center rounded-2xl bg-slate-900 border border-white/10 hover:border-white/20 text-slate-200 transition-all font-semibold text-xs cursor-pointer">Visit Offer</a>
-                <button onClick={() => completeOfferSimulator(viewingOffer)} disabled={submitting} className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:scale-[1.02] text-white transition-all font-bold text-xs shadow-lg shadow-cyan-500/10 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50">
-                  {submitting ? <><Loader size="xs" /> Verifying...</> : <><Play className="w-3.5 h-4" /> Complete Offer</>}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* ── VPN Checking Overlay ── */}

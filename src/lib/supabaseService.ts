@@ -102,17 +102,96 @@ export async function updateProfile(
   if (updates.preference_theme !== undefined) dbUpdates.preference_theme = updates.preference_theme;
   if (updates.preference_language !== undefined) dbUpdates.preference_language = updates.preference_language;
   if (updates.avatar_url !== undefined) dbUpdates.avatar_url = updates.avatar_url;
+  if (updates.avatar_id !== undefined) dbUpdates.avatar_id = updates.avatar_id;
   if (updates.status !== undefined) dbUpdates.status = updates.status;
   if (updates.restriction_reason !== undefined) dbUpdates.restriction_reason = updates.restriction_reason;
   if (updates.restricted_at !== undefined) dbUpdates.restricted_at = updates.restricted_at;
   if (updates.restricted_by !== undefined) dbUpdates.restricted_by = updates.restricted_by;
   if (updates.restriction_notes !== undefined) dbUpdates.restriction_notes = updates.restriction_notes;
   if (updates.registration_ip !== undefined) dbUpdates.registration_ip = updates.registration_ip;
+  if (updates.device_fingerprint !== undefined) dbUpdates.device_fingerprint = updates.device_fingerprint;
+  if (updates.force_password_change !== undefined) dbUpdates.force_password_change = updates.force_password_change;
   if (updates.registration_country !== undefined) dbUpdates.registration_country = updates.registration_country;
   if (updates.registration_isp !== undefined) dbUpdates.registration_isp = updates.registration_isp;
 
   const { error } = await sb.from("profiles").update(dbUpdates).eq("id", userId);
   if (error) throw error;
+}
+
+export async function adminResetPassword(userId: string): Promise<string> {
+  const tempPassword = generateTempPassword(12);
+  const sb = getSupabaseClient();
+
+  // Update password in localStorage coinloot_accounts
+  try {
+    const accounts: Array<{ email: string; password: string; username: string; profile: any }> =
+      JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const idx = accounts.findIndex((a) => a.profile.id === userId);
+    if (idx >= 0) {
+      accounts[idx].password = tempPassword;
+      accounts[idx].profile.force_password_change = true;
+      localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
+    }
+  } catch {}
+
+  // Set force_password_change flag in Supabase profiles table
+  if (sb) {
+    try {
+      await sb.from("profiles").update({ force_password_change: true }).eq("id", userId);
+    } catch {}
+  }
+
+  return tempPassword;
+}
+
+function generateTempPassword(length: number): string {
+  const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const lower = "abcdefghijklmnopqrstuvwxyz";
+  const digits = "0123456789";
+  const special = "!@#$%&";
+  const all = upper + lower + digits + special;
+  let pwd = "";
+  pwd += upper[Math.floor(Math.random() * upper.length)];
+  pwd += lower[Math.floor(Math.random() * lower.length)];
+  pwd += digits[Math.floor(Math.random() * digits.length)];
+  pwd += special[Math.floor(Math.random() * special.length)];
+  for (let i = 0; i < length - 4; i++) {
+    pwd += all[Math.floor(Math.random() * all.length)];
+  }
+  return pwd.split("").sort(() => Math.random() - 0.5).join("");
+}
+
+export async function changeUserPassword(userId: string, newPassword: string): Promise<void> {
+  const sb = getSupabaseClient();
+
+  // Update in Supabase Auth (requires user to be authenticated as themselves)
+  if (sb) {
+    try {
+      const { error } = await sb.auth.updateUser({ password: newPassword });
+      if (error) console.warn("[changeUserPassword] Supabase Auth update failed:", error.message);
+    } catch (e) {
+      console.warn("[changeUserPassword] Supabase Auth exception:", e);
+    }
+  }
+
+  // Update in localStorage
+  try {
+    const accounts: Array<{ email: string; password: string; username: string; profile: any }> =
+      JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const idx = accounts.findIndex((a) => a.profile.id === userId);
+    if (idx >= 0) {
+      accounts[idx].password = newPassword;
+      accounts[idx].profile.force_password_change = false;
+      localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
+    }
+  } catch {}
+
+  // Clear force_password_change flag in Supabase
+  if (sb) {
+    try {
+      await sb.from("profiles").update({ force_password_change: false }).eq("id", userId);
+    } catch {}
+  }
 }
 
 export async function getProfileByEmail(email: string): Promise<UserProfile | null> {
@@ -151,6 +230,8 @@ function mapDbProfileToUserProfile(data: any): UserProfile {
     device_fingerprint: data.device_fingerprint || "",
     country: data.country || "",
     avatar_url: data.avatar_url || undefined,
+    avatar_id: data.avatar_id || undefined,
+    force_password_change: data.force_password_change || false,
     preference_theme: data.preference_theme || undefined,
     preference_language: data.preference_language || undefined,
     is_banned: data.is_banned || false,

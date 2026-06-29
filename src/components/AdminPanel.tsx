@@ -25,7 +25,7 @@ import { createAdminNotification, NotificationPriority } from "../utils/adminNot
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
 import { getSupabaseClient } from "../lib/supabase";
 import { realtimeManager } from "../lib/realtimeManager";
-import { updateWithdrawalStatus } from "../lib/supabaseService";
+import { updateWithdrawalStatus, adminResetPassword } from "../lib/supabaseService";
 import * as AdminDb from "../lib/adminDb";
 import Loader from "./Loader";
 import { 
@@ -1410,6 +1410,10 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [restrictSeconds, setRestrictSeconds] = useState(0);
   const [restrictReason, setRestrictReason] = useState("");
   const [restrictNote, setRestrictNote] = useState("");
+
+  // ── Reset Password State ──
+  const [resetPwdModal, setResetPwdModal] = useState<{ userId: string; username: string; email: string } | null>(null);
+  const [resetPwdResult, setResetPwdResult] = useState<string | null>(null);
   const [countdownTick, setCountdownTick] = useState(Date.now());
   const [profilesRefreshKey, setProfilesRefreshKey] = useState(0);
   const [withdrawalsRefreshKey, setWithdrawalsRefreshKey] = useState(0);
@@ -1864,6 +1868,21 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     addLog("USER_UNBANNED", "user", targetId, "Unbanned user");
     showNotif("success", "User unbanned");
     setProfilesRefreshKey(k => k + 1);
+  };
+
+  const handleResetPassword = async (targetId: string, targetUsername: string, targetEmail: string) => {
+    try {
+      const tempPassword = await adminResetPassword(targetId);
+      setResetPwdResult(tempPassword);
+
+      // Log the action
+      addLog("PASSWORD_RESET", "user", targetId, `Password reset for ${targetUsername} (${targetEmail})`);
+
+      // Notify the user
+      addUserNotification(targetId, "🔐 Password Reset", "Your password has been reset by an administrator. Please change it immediately.", "security");
+    } catch (err) {
+      showNotif("error", "Failed to reset password");
+    }
   };
 
   const handleDeleteUser = async (targetId: string) => {
@@ -2626,6 +2645,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setEditingUserId(p.id); setEditCoins(p.balance_coins); setEditUsd(p.balance_usd); }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20" title="Edit Wallet"><Coins className="w-3 h-3" /></button>
                               <button onClick={() => { setRestrictModal({ userId: p.id, username: p.username }); setRestrictDuration(30); setRestrictDays(0); setRestrictHours(0); setRestrictMinutes(30); setRestrictSeconds(0); setRestrictReason(""); setRestrictNote(""); }} className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20" title="Restrict"><Clock className="w-3 h-3" /></button>
+                              <button onClick={() => { setResetPwdModal({ userId: p.id, username: p.username, email: p.email }); setResetPwdResult(null); }} className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/20" title="Reset Password"><Key className="w-3 h-3" /></button>
                               <button onClick={() => handleToggleKycRequired(p.id, p.username, !p.kyc_required)} className={`p-1.5 rounded-lg border ${p.kyc_required ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20' : 'bg-slate-800/60 text-slate-400 border-white/5 hover:border-purple-500/20 hover:text-purple-400'}`} title={p.kyc_required ? "KYC Mandatory (click to disable)" : "Make KYC Mandatory"}><ShieldCheck className="w-3 h-3" /></button>
                               {p.vpn_detected ? (
                                 <button onClick={() => handleUnbanUser(p.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20" title="Unban"><UserCheck className="w-3 h-3" /></button>
@@ -4988,6 +5008,54 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 <Trash2 className="w-3.5 h-3.5" /> Delete Forever
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {resetPwdModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => { setResetPwdModal(null); setResetPwdResult(null); }}>
+          <div className="max-w-sm w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => { setResetPwdModal(null); setResetPwdResult(null); }} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            <div className="w-12 h-12 rounded-2xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center mx-auto mb-4">
+              <Key className="w-6 h-6 text-orange-400" />
+            </div>
+
+            {!resetPwdResult ? (
+              <>
+                <h3 className="text-base font-bold text-white text-center mb-1">Reset Password</h3>
+                <p className="text-[10px] text-slate-400 font-mono text-center mb-5">
+                  Generate a temporary password for <strong className="text-white">{resetPwdModal.username}</strong>?
+                </p>
+                <p className="text-[9px] text-amber-400/70 font-mono text-center mb-5 leading-relaxed bg-amber-500/5 rounded-xl p-3 border border-amber-500/10">
+                  The user will be notified and forced to change their password on next login.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => { setResetPwdModal(null); setResetPwdResult(null); }} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">
+                    Cancel
+                  </button>
+                  <button onClick={() => handleResetPassword(resetPwdModal.userId, resetPwdModal.username, resetPwdModal.email)} className="flex-1 py-2.5 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[10px] font-bold hover:bg-orange-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                    <Key className="w-3.5 h-3.5" /> Generate & Reset
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-bold text-white text-center mb-1">Password Reset Complete</h3>
+                <p className="text-[10px] text-slate-400 font-mono text-center mb-4">
+                  Temporary password for <strong className="text-white">{resetPwdModal.username}</strong>:
+                </p>
+                <div className="bg-slate-900/80 rounded-2xl p-4 mb-5 border border-white/5 text-center">
+                  <code className="text-lg font-mono font-bold text-cyan-400 tracking-wider select-all">{resetPwdResult}</code>
+                </div>
+                <p className="text-[9px] text-slate-500 font-mono text-center mb-5 leading-relaxed">
+                  Share this password securely with the user. They will be prompted to change it on next login.
+                </p>
+                <button onClick={() => { setResetPwdModal(null); setResetPwdResult(null); }} className="w-full py-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-[10px] font-bold hover:bg-cyan-500/30 transition-all cursor-pointer">
+                  Done
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

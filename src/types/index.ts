@@ -26,6 +26,8 @@ export interface UserProfile {
   is_banned?: boolean;
   restricted_until?: string | null;
   avatar_url?: string;
+  avatar_id?: string;
+  force_password_change?: boolean;
   preference_theme?: string;
   preference_language?: string;
   status?: 'active' | 'restricted' | 'banned';
