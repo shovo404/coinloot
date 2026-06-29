@@ -100,10 +100,10 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         setPromoError(result.error || "Invalid promo code.");
         return;
       }
-      playCoinSound();
-      setUser({ ...user, balance_coins: user.balance_coins + result.coins!, total_earned_coins: user.total_earned_coins + result.coins!, balance_usd: (user.balance_coins + result.coins!) / 1000 });
-      setPromoSuccess(`Success! Promo code verified: +${result.coins} coins!`);
+      // Use centralized reward handler for full pipeline (notification, popup, sound, level-up, feed)
+      onRewardEarned(result.coins!, "Promo Code", `Promo code "${code}" redeemed! +${result.coins!.toLocaleString()} coins credited.`);
       setPromoCodeInput("");
+      setPromoSuccess(`Success! Promo code verified: +${result.coins} coins!`);
     } catch {
       setPromoError("Failed to validate promo code. Please try again.");
     }

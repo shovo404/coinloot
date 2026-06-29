@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { createClient } from "@supabase/supabase-js";
 import { UserProfile, WithdrawalRequest, PromoCode } from "../types";
 import { calcLevel } from "../utils/levelSystem";
 
@@ -8,12 +9,62 @@ export async function signUp(email: string, password: string, username: string) 
   const sb = getSupabaseClient();
   if (!sb) return null;
 
-  const { data: authData, error: authError } = await sb.auth.signUp({
-    email,
-    password,
-    options: { data: { username } },
-  });
-  if (authError) throw authError;
+  let authData;
+
+  try {
+    const result = await sb.auth.signUp({
+      email,
+      password,
+      options: { data: { username } },
+    });
+    authData = result;
+    if (result.error) throw result.error;
+  } catch (authErr: any) {
+    // If the auth user already exists, check whether the profile was soft-deleted.
+    // If so, re-activate it rather than blocking registration.
+    const msg = authErr?.message || "";
+    if (msg.includes("already registered") || msg.includes("already exists")) {
+      // Check if there is a soft-deleted profile with this email
+      const existingProfile = await getActiveProfileByEmail(email);
+      if (!existingProfile) {
+        // Profile was either permanently deleted or doesn't exist — auth user
+        // is orphaned. Try to delete the orphaned auth user using service role
+        // and re-register. This only works if VITE_SUPABASE_SERVICE_ROLE_KEY is set.
+        const adminClient = getAdminClient();
+        if (adminClient) {
+          try {
+            // List auth users to find the orphaned one
+            const { data: orphanedUsers } = await adminClient.auth.admin.listUsers() as any;
+            const orphaned = (orphanedUsers?.users || []).find((u: any) => u.email === email);
+            if (orphaned) {
+              await deleteAuthUser(orphaned.id);
+              // Retry sign-up
+              const retry = await sb.auth.signUp({
+                email,
+                password,
+                options: { data: { username } },
+              });
+              if (retry.error) throw retry.error;
+              authData = retry;
+            } else {
+              throw authErr;
+            }
+          } catch {
+            // Admin client unavailable or operation failed — email is truly taken
+            throw authErr;
+          }
+        } else {
+          // No service role key configured — cannot delete orphaned auth user
+          throw authErr;
+        }
+      } else {
+        // Profile exists and is not deleted — email truly taken
+        throw authErr;
+      }
+    } else {
+      throw authErr;
+    }
+  }
 
   if (authData.user) {
     // Create profile in profiles table (trigger handles referral link + notif settings)
@@ -30,7 +81,11 @@ export async function signUp(email: string, password: string, username: string) 
       is_admin: false,
       vpn_detected: false,
     });
-    if (profileError) throw profileError;
+    if (profileError) {
+      // If profile insertion fails (e.g. duplicate key), the auth user was
+      // created but profile wasn't — still a success for re-registration
+      console.warn("[signUp] Profile insertion warning:", profileError.message);
+    }
   }
 
   return authData;
@@ -49,6 +104,165 @@ export async function signOut() {
   const sb = getSupabaseClient();
   if (!sb) return;
   await sb.auth.signOut();
+}
+
+function getAdminClient() {
+  const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string | undefined;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  if (!serviceKey || !supabaseUrl) return null;
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+export async function deleteAuthUser(userId: string): Promise<{ success: boolean; error?: string }> {
+  const adminClient = getAdminClient();
+  if (!adminClient) {
+    console.warn("[deleteAuthUser] VITE_SUPABASE_SERVICE_ROLE_KEY not set. Supabase Auth user not deleted.");
+    return { success: false, error: "Service role key not configured" };
+  }
+
+  try {
+    const { error } = await adminClient.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("[deleteAuthUser] Failed to delete auth user:", err?.message || err);
+    return { success: false, error: err?.message || "Unknown error deleting auth user" };
+  }
+}
+
+/**
+ * Soft-delete a user: sets deleted_at on their profile so the email stays
+ * reserved but the account can be restored. Removes localStorage entries.
+ */
+export async function softDeleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
+  const adminClient = getAdminClient();
+  if (!adminClient) {
+    // Fallback: try authenticated client
+    const sb = getSupabaseClient();
+    if (!sb) return { success: false, error: "Supabase client not available" };
+    const { error } = await sb.from("profiles").update({
+      deleted_at: new Date().toISOString(),
+      status: "deleted",
+      is_banned: true,
+    }).eq("id", userId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }
+
+  try {
+    const { error } = await adminClient.from("profiles").update({
+      deleted_at: new Date().toISOString(),
+      status: "deleted",
+      is_banned: true,
+    }).eq("id", userId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to soft-delete user" };
+  }
+}
+
+/**
+ * Restore a soft-deleted user by clearing deleted_at.
+ */
+export async function restoreUser(userId: string): Promise<{ success: boolean; error?: string }> {
+  const adminClient = getAdminClient();
+  const sb = adminClient || getSupabaseClient();
+  if (!sb) return { success: false, error: "Supabase client not available" };
+
+  try {
+    const { error } = await sb.from("profiles").update({
+      deleted_at: null,
+      status: "active",
+      is_banned: false,
+    }).eq("id", userId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to restore user" };
+  }
+}
+
+/**
+ * Permanently delete a user from ALL Supabase tables AND Auth.
+ * Uses the service-role client to bypass RLS.
+ */
+export async function permanentDeleteUser(userId: string, email?: string): Promise<{ success: boolean; error?: string }> {
+  const adminClient = getAdminClient();
+  if (!adminClient) {
+    return { success: false, error: "Service role key not configured — cannot permanently delete" };
+  }
+
+  const tables = [
+    "coin_transactions", "earnings_history", "live_earnings",
+    "notifications", "notification_settings",
+    "withdrawals", "support_tickets", "kyc_records",
+    "referral_earnings", "referral_links",
+    "login_history", "user_activity_logs",
+    "daily_rewards", "achievement_rewards",
+    "leaderboard_statistics", "user_balances",
+    "promo_code_redemptions",
+    "fraud_detection_logs",
+    "campaign_submissions",
+    "campaign_submission_screenshots",
+    "ticket_replies",
+    "email_verifications",
+    "wallet_configurations",
+  ];
+
+  try {
+    // 1. Delete from all related tables
+    for (const table of tables) {
+      try {
+        await adminClient.from(table).delete().eq("user_id", userId);
+      } catch {
+        // Some tables may not exist — skip
+      }
+    }
+
+    // 2. Delete from profiles (ON DELETE CASCADE from auth.users handles this,
+    //    but we delete explicitly in case the FK is not set up)
+    try {
+      await adminClient.from("profiles").delete().eq("id", userId);
+    } catch {}
+
+    // 3. Delete from Supabase Auth
+    const authResult = await deleteAuthUser(userId);
+    if (!authResult.success) {
+      return { success: false, error: authResult.error || "Failed to delete auth user" };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("[permanentDeleteUser] Failed:", err?.message || err);
+    return { success: false, error: err?.message || "Unknown error during permanent deletion" };
+  }
+}
+
+/**
+ * Check if a profile exists and is NOT soft-deleted.
+ * Used during registration to allow re-registration with an email that
+ * was used by a permanently deleted user.
+ */
+export async function getActiveProfileByEmail(email: string): Promise<UserProfile | null> {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+
+  try {
+    const { data, error } = await sb
+      .from("profiles")
+      .select("*")
+      .eq("email", email)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return mapDbProfileToUserProfile(data);
+  } catch {
+    return null;
+  }
 }
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────

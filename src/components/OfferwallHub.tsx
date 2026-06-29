@@ -11,6 +11,7 @@ import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getProviderInfo, getProviderLogoUrl, getProviderDomain, getAllProviders } from "../utils/providerLogos";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 import { calcLevel } from "../utils/levelSystem";
+import { isOfferwallUnlockedByCode, isOfferwallLockEnabled } from "../utils/lockedOfferwallDB";
 
 interface OfferwallHubProps {
   user: UserProfile;
@@ -152,6 +153,16 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
     const map = new Map<string, { locked: boolean; reason: string }>();
     if (adminOffers.length > 0) {
       adminOffers.forEach((ao: any) => {
+        // Check per-offerwall lock enabled status
+        if (!isOfferwallLockEnabled(ao.provider)) {
+          map.set(ao.id, { locked: false, reason: "" });
+          return;
+        }
+        // Check if user unlocked this provider via special unlock code
+        if (isOfferwallUnlockedByCode(user.id, ao.provider)) {
+          map.set(ao.id, { locked: false, reason: "" });
+          return;
+        }
         if (ao.status === "locked") {
           const evalResult = evaluateLockRules(user, lockRules);
           map.set(ao.id, evalResult.locked ? evalResult : { locked: true, reason: "Locked by admin" });

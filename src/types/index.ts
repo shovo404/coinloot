@@ -231,4 +231,19 @@ export interface RestrictionLogEntry {
   notes: string;
 }
 
+export interface PasswordRecoveryRequest {
+  id: string;
+  userId: string;
+  username: string;
+  email: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'completed';
+  adminId: string | null;
+  adminNotes: string | null;
+  resetToken: string | null;
+  tokenExpiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

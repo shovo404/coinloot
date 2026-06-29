@@ -116,6 +116,7 @@ create table if not exists public.profiles (
   vpn_detected boolean default false not null,
   device_fingerprint text,
   last_login_at timestamp with time zone,
+  deleted_at timestamp with time zone,
   preference_theme text default 'dark' check (preference_theme in ('dark', 'light', 'system')),
   preference_language text default 'en',
   notification_email boolean default true,

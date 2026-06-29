@@ -1,16 +1,32 @@
-import { User, ShieldCheck, Calendar, MapPin, Award, Coins, DollarSign, Users, CheckCircle, Fingerprint, Globe } from "lucide-react";
+import { useState } from "react";
+import { User, ShieldCheck, Camera, Calendar, MapPin, Award, Coins, DollarSign, Users, CheckCircle, Fingerprint, Globe, Sparkles } from "lucide-react";
 import { UserProfile } from "../types";
 import LevelProgress from "./LevelProgress";
 import { calcLevel } from "../utils/levelSystem";
+import AvatarGallery from "./AvatarGallery";
 
 interface MyProfilePageProps {
   user: UserProfile;
+  setUser?: (u: UserProfile) => void;
 }
 
-export default function MyProfilePage({ user }: MyProfilePageProps) {
+export default function MyProfilePage({ user, setUser }: MyProfilePageProps) {
+  const [showAvatarGallery, setShowAvatarGallery] = useState(false);
   const joinDate = new Date("2025-11-14").toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric"
   });
+
+  const handleAvatarSelect = (avatar: { id: string; svg: string; name: string }) => {
+    const updated = { ...user, avatar_url: avatar.svg };
+    if (setUser) setUser(updated);
+    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
+    const updatedAccounts = accounts.map((a: any) => {
+      if (a.profile.id === user.id) return { ...a, profile: { ...a.profile, avatar_url: avatar.svg } };
+      return a;
+    });
+    localStorage.setItem("coinloot_accounts", JSON.stringify(updatedAccounts));
+    setShowAvatarGallery(false);
+  };
 
   const profileFields = [
     { label: "Username", value: user.username, icon: User, color: "text-cyan-400" },
@@ -42,12 +58,21 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
       <div className="glass rounded-3xl p-6 sm:p-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-60 h-60 bg-gradient-to-br from-cyan-500/5 to-purple-500/5 blur-[80px] rounded-full pointer-events-none" />
         <div className="relative flex flex-col sm:flex-row items-center sm:items-start gap-6">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-4xl sm:text-5xl shadow-lg shadow-cyan-500/20 shrink-0 overflow-hidden">
-            {user.avatar_url ? (
-              <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
-            ) : (
-              <span>{user.username[0].toUpperCase()}</span>
-            )}
+          <div className="relative shrink-0">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-4xl sm:text-5xl shadow-lg shadow-cyan-500/20 overflow-hidden">
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
+              ) : (
+                <span>{user.username[0].toUpperCase()}</span>
+              )}
+            </div>
+            <button
+              onClick={() => setShowAvatarGallery(true)}
+              className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-purple-600 text-white hover:scale-110 transition-all shadow-lg cursor-pointer"
+              title="Change Avatar"
+            >
+              <Camera className="w-3 h-3" />
+            </button>
           </div>
           <div className="text-center sm:text-left">
             <h2 className="font-sans font-bold text-2xl sm:text-3xl text-white">{user.username}</h2>
@@ -123,6 +148,14 @@ export default function MyProfilePage({ user }: MyProfilePageProps) {
           ))}
         </div>
       </div>
+
+      {showAvatarGallery && (
+        <AvatarGallery
+          currentAvatarId={undefined}
+          onSelect={(avatar: any) => handleAvatarSelect(avatar)}
+          onClose={() => setShowAvatarGallery(false)}
+        />
+      )}
     </div>
   );
 }

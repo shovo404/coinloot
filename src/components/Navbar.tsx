@@ -623,6 +623,22 @@ export default function Navbar({
         </>
       )}
 
+      {/* ── KYC Mandatory Banner ── */}
+      {user && user.kyc_required && user.kyc_status !== "APPROVED" && (
+        <div className="bg-gradient-to-r from-amber-600/20 via-amber-500/15 to-amber-600/20 border-t border-b border-amber-500/20 px-4 py-2.5 flex items-center justify-center gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+          <p className="text-[11px] sm:text-xs text-amber-300 font-medium text-center">
+            KYC Verification Required —{" "}
+            <button
+              onClick={() => setActiveTab?.("kyc-upload")}
+              className="underline font-bold hover:text-amber-200 transition-colors cursor-pointer"
+            >
+              Complete verification now
+            </button>
+            {" "}to unlock offers and withdrawals.
+          </p>
+        </div>
+      )}
     </header>
   );
 }

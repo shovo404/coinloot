@@ -1,141 +1,150 @@
-# Project Changelog
+# Changelog
 
-## 2026-06-30 — MetReward-Style Offer System Redesign
+All notable changes to this project are documented here.
 
-### Added
-- **`src/utils/offerData.ts`** — Dynamic offer data source architecture with:
-  - Demo featured/hot offers with real game-like thumbnails, milestone steps, rewards
-  - `OfferSource` interface for future API provider registration
-  - Placeholder functions for future API integration (TOROX, AdGem, AdGate, Lootably, etc.)
-  - When API sources are configured, offers automatically replace demo data
-- **`src/components/OfferCard.tsx`** — MetReward-style compact card component:
-  - Fixed 190-210px width horizontal scroll card
-  - Large 4:3 aspect ratio game thumbnail at top
-  - Provider badge on image, reward badge overlay
-  - "UP TO X" badge for multi-step rewards
-  - Title (2-line clamp), description (1-line clamp)
-  - "View Offer" button on hover with scale effect
-  - Dark premium theme with hover glow
-- **New offer data structure**: Each offer supports `title`, `description`, `imageUrl`, `reward`, `provider`, `offer_url`, plus `steps[]` with milestone rewards
-
-### Modified
-- **`src/components/EarnPage.tsx`**:
-  - Featured/Hot offer sections redesigned: grid layout → `HorizontalScroll` with `OfferCard`
-  - Removed old inline offer detail modal (simple single-reward view)
-  - Removed unused `handleLaunchOffer`/`completeOfferSimulator` usage for Hot offers (now unified through `viewingOfferDetails` → `OfferDetailsModal`)
-  - Added offer count badges to section headers
-- **`src/components/OfferDetailsModal.tsx`** — Complete MetReward-style redesign:
-  - Full-width 16:9 cover image at top with gradient overlay
-  - Provider badge + platform badge (Mobile/Cross-Platform) overlaid on image
-  - Reward badge with total reward on image
-  - "How to Earn" section with numbered milestone steps (e.g. "1. Complete Level 10 → +100 Coins")
-  - Each step has "Claim" button (when offer is started)
-  - Completed steps shown with green checkmark + strikethrough
-  - Total Reward card with amber gradient, progress bar
-  - "Start Offer" CTA button → opens tracking link, enables step claiming
-  - "All Rewards Claimed" state when all steps completed
-  - No tabs, no activity feed, no QR code, no support form in main flow
-  - Clean single-column layout matching MetReward style
-- **`PROJECT_CHANGELOG.md`** — This entry
-
-### Not Changed
-- Wallet, Rewards, Notifications, Withdrawals, Referrals, User Accounts kept intact
-- Existing offerwall provider system, admin offers, API offer fetching preserved
-- `Offer` type in `types/index.ts` unchanged (already had `steps?`, `max_reward?`, `tracking_link?`)
-
-## 2026-06-30 — Forgot Password Feature
+## 2026-06-30 — Fix User Deletion and Re-Registration Issue
 
 ### Added
-- **"Forgot Password?" link** on the Sign In form below the password field
-- **3-step forgot password flow** inside AuthModal:
-  1. **Email step** — user enters registered email, admin fallback notice shown
-  2. **OTP step** — 6-digit code verification with 10-minute expiry, resend with 30s cooldown
-  3. **New Password step** — set new password with confirmation, auto-login on success
-- **OTP-based reset system** — stores OTP in localStorage with expiry, marks used after verification
-- **Rate limiting** — max 3 OTP requests per email per hour, tracked in localStorage
-- **Admin fallback messaging** — notice in forgot password UI directing users to contact support or use admin panel
-- **Activity logging** — password reset via forgot flow logged to `coinloot_admin_logs` as `PASSWORD_CHANGED`
+- **`src/lib/supabaseService.ts`**:
+  - `softDeleteUser(userId)` — Sets `deleted_at`, `status: "deleted"`, `is_banned: true` on profile (email stays reserved)
+  - `restoreUser(userId)` — Clears `deleted_at`, resets `status: "active"`, `is_banned: false`
+  - `permanentDeleteUser(userId, email?)` — Deletes from 20+ related tables + Supabase Auth (email becomes available for re-registration)
+  - `getActiveProfileByEmail(email)` — Queries profiles with `deleted_at IS NULL` for registration validation
+  - `getAdminClient()` — Shared helper to create service-role Supabase client
 
 ### Modified
-- `src/components/AuthModal.tsx` — Added forgot password state variables, handlers, and 3 UI views; updated header subtitle; added Forgot Password link
+- **`src/lib/supabaseService.ts`**:
+  - `signUp()` — Now detects orphaned auth users (deleted profile but auth user still exists) and deletes + re-registers them automatically
+  - `deleteAuthUser()` — Refactored to use shared `getAdminClient()` helper
+  - Added missing table cleanup in `permanentDeleteUser`: `campaign_submission_screenshots`, `ticket_replies`, `email_verifications`, `wallet_configurations`, `password_recovery_requests`
+- **`src/components/AdminPanel.tsx`**:
+  - Replaced single `handleDeleteUser` with three handlers:
+    - `handleSoftDeleteUser` — Soft deletes + localStorage cleanup
+    - `handleRestoreUser` — Restores soft-deleted user
+    - `handlePermanentDeleteUser` — Permanently deletes from all tables + Auth
+  - Added `cleanupLocalStorage(targetId)` — Shared helper to clean all localStorage entries for a deleted user
+  - Updated delete modal: now shows three options — **Soft Delete** (with Archive icon), **Permanent Delete** (with Trash2 icon), and **Cancel**
+  - Added `Archive` to lucide-react imports
+  - Imported `softDeleteUser`, `permanentDeleteUser`, `restoreUser` from supabaseService
+- **`supabase_schema.sql`** — Added `deleted_at timestamp with time zone` column to profiles table
 
-## 2026-06-29 — Critical Reward Flow Fix
+### How it works
+| Action | Effect on Supabase | Effect on Auth | Email available? |
+|---|---|---|---|
+| **Soft Delete** | Sets `deleted_at`, `status`, `is_banned` | No change | ❌ Reserved |
+| **Permanent Delete** | Removes from all tables | Deleted from Auth | ✅ Yes |
+| **Restore** | Clears `deleted_at` | No change | N/A |
+
+### Registration flow
+1. User tries to sign up with an email
+2. If auth says "already registered", system checks for a non-deleted profile
+3. If no active profile found, the orphaned auth user is deleted and sign-up retried automatically
+4. If active profile found, registration is blocked as expected
+
+### Files modified
+- `src/lib/supabaseService.ts` — Core deletion/restore/validation functions
+- `src/components/AdminPanel.tsx` — Admin UI for soft/permanent delete + restore
+- `supabase_schema.sql` — Schema update with `deleted_at` column
+
+## 2026-06-30 — Removed Global Lock System → Per-Offerwall Lock Toggle
+
+### Removed
+- **Global Lock System toggle** — Completely removed from all components
+- **`getOfferwallLockSystemEnabled()` / `setOfferwallLockSystemEnabled()`** — Removed from `lockedOfferwallDB.ts`
+- **`GLOBAL_LOCK_KEY`** constant removed
+
+### Added
+- **`lockedOfferwallDB.ts`**: `getOfferwallLockStatusMap()`, `setOfferwallLockEnabled(providerName, enabled)`, `isOfferwallLockEnabled(providerName)` — each offerwall stores its own independent lock enable/disable state
+- **AdminLockedOfferwalls.tsx**: Individual ON/OFF toggle switch per provider row (green emerald = enabled, slate = disabled)
+- **`toggleLock(providerName)`** function in admin panel for per-offerwall toggle
+
+### Modified
+- **`AdminLockedOfferwalls.tsx`**: Removed the entire "Global Lock System Toggle" UI section (gradient card, status badges, switch). Added per-offerwall toggle switch in each provider row. Keep Edit/Delete buttons.
+- **`LockedOfferwallCard.tsx`**: Checks `isOfferwallLockEnabled(config.providerName)` instead of global lock
+- **`OfferwallHub.tsx`**: Checks `isOfferwallLockEnabled(ao.provider)` instead of global lock
+- **`EarnPage.tsx`**: All 3 lock-check paths (`lockedConfigs`, `adminLockStatusMap`, `lockedProviderMap`) now use `isOfferwallLockEnabled(providerName)` instead of `getOfferwallLockSystemEnabled()`
+
+### Behavior
+| Toggle State | Effect |
+|---|---|
+| **ON** (default) | Lock active — users must meet configured requirements |
+| **OFF** | Lock bypassed — users access immediately, config preserved |
+
+Each offerwall operates independently: TOROX=ON, AdGem=OFF, Lootably=ON, BitLabs=OFF — all independent.
+
+### Files modified
+- `src/utils/lockedOfferwallDB.ts` — Replaced global lock with per-offerwall lock status functions
+- `src/components/AdminLockedOfferwalls.tsx` — Removed global toggle, added per-offerwall toggles
+- `src/components/LockedOfferwallCard.tsx` — Per-offerwall lock check
+- `src/components/OfferwallHub.tsx` — Per-offerwall lock check
+- `src/components/EarnPage.tsx` — Per-offerwall lock checks (3 locations)
+
+## 2026-06-30 — VPN & Proxy Page Fix: Blank Page → Full Management Suite
 
 ### Root Cause
-`handleRewardEarned` in `App.tsx` had 4 bugs:
+Sidebar parent ID `"vpn"` had no corresponding handler in `renderSection` inside `AdminPanel.tsx`. Clicking "VPN & Proxy" in the sidebar would navigate to `section="vpn"`, which produced no JSX output — resulting in a completely blank page below the admin layout header. Only the child sections (`vpn-api`, `vpn-control`) had handlers (inside the SECURITY block), but the parent itself rendered nothing.
 
-1. **`total_earned_coins` never persisted to DB** — `dbUpd` only included `balance_coins`, `level`, `xp`. On page refresh, profile re-fetch reverted `total_earned_coins` to old value.
+### Added
+- **`src/components/VpnPage.tsx`** — New comprehensive VPN & Proxy management page with three tabs:
+  - **Detection Logs tab**: Statistics dashboard (Total Checks, VPN Users, Proxy Users, Clean Users, Today's Checks, Flagged Users), search & filter by type, detection logs table (User, IP, Country, Detection Type, ISP, Risk Score), flagged users section, clear logs, empty state message
+  - **API Configuration tab**: Provider selector (ProxyCheck.io / IPQualityScore / IPHub), API key input with show/hide toggle, status display (Connected/Disconnected/Not Configured), "Test Connection" button, Detection Enable toggle, Detection Sensitivity slider, Detection Points info grid, localStorage fallback for all API calls
+  - **Control Center tab**: VPN Protection Settings (VPN Warning, Offerwall Block, Withdrawal Block toggles), Auto-Restriction Rules (enable/disable, detection threshold, restrict duration)
+  - Proper empty states: "No VPN or Proxy detections found yet", "VPN Detection API is not configured" warning
 
-2. **No transaction/earnings audit trail** — Unlike `addCoins()` which writes to `coin_transactions`, `earnings_history`, and `live_earnings`, the normal reward flow only updated the `profiles` table with `updateProfile()`.
+### Modified
+- **`src/components/AdminPanel.tsx`**:
+  - Added `import VpnPage from "./VpnPage"`
+  - Added VPN handler in `renderSection` (BEFORE SECURITY block): `if (section === "vpn" || section === "vpn-api" || section === "vpn-control")` with early return to `VpnPage`
+  - Removed dead `VpnControlCenter` and `VpnApiConfigSection` render calls from SECURITY block (now unreachable)
+  - Removed unused `import VpnApiConfigSection from "./VpnApiConfigSection"`
 
-3. **Notification fired BEFORE DB write** — `addNotification()` called at line 693, DB `updateProfile()` at line 703. User saw "You earned X coins" even if the DB update failed.
+### Fixed
+- **Blank VPN & Proxy page** — Root cause fixed. All three navigation paths (`vpn`, `vpn-api`, `vpn-control`) now render the VpnPage component
+- **API calls without fallbacks** — All `ApiConfigTab` fetch calls to `/api/vpn/config`, `/api/vpn/test`, etc. now have localStorage fallbacks, so the page works without a backend
 
-4. **Silent error swallowing** — `.catch(() => {})` on the `updateProfile()` promise hid all database failures.
+### Files modified
+- `src/components/VpnPage.tsx` — New file, comprehensive VPN management page
+- `src/components/AdminPanel.tsx` — Integrated VpnPage, removed dead code
+- `PROJECT_CHANGELOG.md` — This entry
 
-### Files Modified
-- **`src/App.tsx`** — Rewrote `handleRewardEarned` to:
-  - Call `addCoins()` which atomically updates profile + creates `coin_transactions` + `earnings_history` + `live_earnings` records
-  - Only update local React state AFTER successful DB write
-  - Only show notification + play sound AFTER successful DB write
-  - Log errors to console instead of swallowing them
-  - Handle XP persistence separately (addCoins doesn't cover XP)
-  - Level calculated from `total_earned_coins` (lifetime earnings) instead of `balance_coins`
+## 2026-06-30 — VPN Test Connection: Fix "Unexpected status: denied" Error
 
-- **`src/components/AdminPanel.tsx`** — Fixed double-credit bug:
-  - `handleAddCoins` was calling `addCoins()` directly AND then `onRewardEarned()` which called `addCoins()` again via `handleRewardEarned`
-  - Removed `onRewardEarned` call; `addCoins()` already does the complete DB write
-  - Same fix for "Bonus to all users" path
+### Root Cause
+ProxyCheck.io returns `{"status":"denied"}` when an API key is suspended, blocked, or the server IP is not whitelisted. The server's `testKey()` function only handled `"ok"` and `"error"` statuses — all other statuses (including `"denied"`) fell through to the generic catch-all `"Unexpected status: ${parsed.status}"`, producing the unhelpful error message.
 
-- **`src/components/RewardsStore.tsx`** — Fixed double-credit bug:
-  - Promo code flow called `validatePromoCode()` (which calls `addCoins()` internally) AND then `onRewardEarned()` which called `addCoins()` again
-  - Replaced `onRewardEarned` with direct local state update + sound
+Investigation confirmed:
+- ProxyCheck.io returns `"ok"` for any key on basic lookups (even fake keys)
+- `"denied"` is returned when a key has been explicitly suspended, blocked, or rate-limited
+- The HTTP status code and raw API response were not included in error responses, making debugging impossible from the UI
+- The provider registry only had `proxycheck` registered — selecting IPQualityScore or IPHub from the UI would silently fail
 
-### Database Tables Involved
-- `profiles` — `balance_coins`, `total_earned_coins`, `balance_usd`, `level`, `xp`
-- `coin_transactions` — now properly created for all reward sources
-- `earnings_history` — now properly created for all reward sources
-- `live_earnings` — now properly created for all reward sources
+### Added
+- **`server.ts`**:
+  - `ipqualityscoreProvider` and `iphubProvider` stubs with clear "not implemented" messages
+  - Updated providers registry to include all 3 providers (`proxycheck`, `ipqualityscore`, `iphub`)
+  - `VpnProvider.testKey` interface now includes optional `httpStatus` and `rawResponse` fields
 
-### Level Calculation
-- **Before**: `calcLevel(balance_coins)` — level based on current wallet balance (would decrease on withdrawal)
-- **After**: `calcLevel(total_earned_coins)` — level based on lifetime earnings (never decreases)
-- This is consistent with how `addCoins()` already calculated level internally
+### Modified
+- **`server.ts`** (`proxycheckProvider.testKey`):
+  - Added handler for `denied` status → "API Access Denied — your API key may be invalid, suspended, or the server IP is not whitelisted"
+  - Added handler for `blocked` status → "API access blocked — the key or IP has been blocked"
+  - Added handler for `limit` status → "Rate limit exceeded — your ProxyCheck.io query limit has been reached"
+  - All error responses now include `httpStatus` and `rawResponse` for debugging
+  - `checkIp` function also updated with same `denied`/`blocked`/`limit` handling
+- **`server.ts`** — Removed old duplicate `providers` declaration (was causing redeclaration error)
+- **`src/components/VpnPage.tsx`** (`handleTestConnection`):
+  - Now captures and displays HTTP status code alongside error messages
+  - Handles JSON parse failures with HTTP status context
+  - Builds descriptive error string from error message + HTTP status
 
-## 2026-06-29 — Notification System Cleanup & Admin Routing + Mobile Responsiveness
-
-### Notification Fixes
-- **Unwanted notifications removed** — Added one-time cleanup in `App.tsx` that filters out stale broadcast notifications ("📢 Announcement" / "🎉 Promo Event" with short descriptions) from localStorage on boot. This prevents old test broadcasts like "Hi" from persisting.
-
-- **Admin notification routing** — All user actions now generate admin notifications via `createAdminNotification()`:
-
-| User Action | Admin Notification | File |
+### Error Handling Improvements
+| Scenario | Before | After |
 |---|---|---|
-| KYC submitted | 🪪 KYC Submitted | `kycEngine.ts` |
-| Support ticket created | 🎫 New Support Ticket | `SupportTicket.tsx` |
-| Social bounty submitted | 🎯 Campaign Submitted | `supabaseService.ts` |
-| Offer completed | 🏆 Offer Completed (>100 coins) | `App.tsx` |
-| User registered | 🆕 New User Registration | `AuthModal.tsx` |
-| Promo code redeemed | 🎁 Promo Code Redeemed | `supabaseService.ts` |
-| Withdrawal requested | 💰 New Withdrawal Request | `WithdrawHub.tsx` *(already wired)* |
+| Suspended key | `❌ Unexpected status: denied` | `❌ API Access Denied — your API key may be invalid, suspended, or the server IP is not whitelisted` |
+| Rate limited | `❌ Unexpected status: limit` | `❌ Rate limit exceeded — your ProxyCheck.io query limit has been reached` |
+| Incomplete provider | `❌ Unexpected status: denied` (from IPQualityScore/IPHub) | `❌ IPQualityScore provider not fully implemented yet. Use ProxyCheck.io instead.` |
+| Network failure | `❌ Invalid API Key` | `❌ Failed to test connection` |
 
-- **Notification routing separation** — User notifications go through `addNotification()`/`addUserNotification()` (localStorage + Supabase `notifications` table). Admin notifications go through `createAdminNotification()` (localStorage + API POST). No cross-contamination.
-
-### Mobile Responsiveness
-- Added comprehensive mobile CSS in `index.css` targeting:
-  - All viewport widths (320px, 375px, 390px, 414px, tablets, desktop)
-  - Page wrapper padding responsive
-  - Table horizontal scroll
-  - Modal bottom-sheet behavior on mobile
-  - Touch target minimum sizes (44px)
-  - Text overflow prevention (`overflow-wrap: break-word`)
-  - Grid column reduction on tablet
-  - Card padding reduction on tiny screens
-  - Notification panel full-width on mobile
-
-### Files Modified
-- `src/App.tsx` — Stale broadcast notification cleanup; admin notification for offer completions
-- `src/utils/kycEngine.ts` — Admin notification on KYC submission
-- `src/components/SupportTicket.tsx` — Admin notification on ticket creation
-- `src/lib/supabaseService.ts` — Admin notification on campaign submission and promo code redemption
-- `src/components/AuthModal.tsx` — Admin notification on new user registration
-- `src/index.css` — Comprehensive mobile responsive CSS
+### Files modified
+- `server.ts` — Fixed testKey/checkIp status handling, added provider stubs, updated registry, removed duplicate
+- `src/components/VpnPage.tsx` — Better error display with HTTP status

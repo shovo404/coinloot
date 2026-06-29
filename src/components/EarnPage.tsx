@@ -4,7 +4,7 @@ import {
   Star, Lock, ArrowUpRight, Info,
   Play, BarChart3, Flame,
   Crown, Megaphone, Gift, Clock, Copy, CheckCircle, Flag, Upload, ExternalLink,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Key, AlertCircle,
 } from "lucide-react";
 import Loader from "./Loader";
 import { UserProfile, Offer } from "../types";
@@ -19,7 +19,7 @@ import { playCoinSound } from "../utils/coinSound";
 import HorizontalScroll from "./HorizontalScroll";
 import SurveyHub from "./SurveyHub";
 import VpnBlockPopup from "./VpnBlockPopup";
-import { getLockedOfferwallConfigs, isOfferwallUnlocked } from "../utils/lockedOfferwallDB";
+import { getLockedOfferwallConfigs, isOfferwallUnlocked, isOfferwallUnlockedByCode, isOfferwallLockEnabled, validateOfferwallUnlockCode, incrementUnlockCodeUsage, addUserUnlockedOfferwall } from "../utils/lockedOfferwallDB";
 import LockedOfferwallCard from "./LockedOfferwallCard";
 import OfferDetailsModal from "./OfferDetailsModal";
 import OfferCard from "./OfferCard";
@@ -97,7 +97,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const [lockedUnlockTick, setLockedUnlockTick] = useState(0);
   const lockedConfigs = useMemo(() => {
     return getLockedOfferwallConfigs().filter(
-      (c) => c.isLocked && !isOfferwallUnlocked(user.id, c.providerName)
+      (c) => c.isLocked && isOfferwallLockEnabled(c.providerName) && !isOfferwallUnlocked(user.id, c.providerName) && !isOfferwallUnlockedByCode(user.id, c.providerName)
     );
   }, [user.id, user.total_earned_coins, lockedUnlockTick]);
 
@@ -106,6 +106,10 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const [campaignModal, setCampaignModal] = useState<any>(null);
   const [campaignModalTasks, setCampaignModalTasks] = useState<any[]>([]);
   const [submittingCampaign, setSubmittingCampaign] = useState(false);
+
+  const [unlockCodeInputs, setUnlockCodeInputs] = useState<Record<string, string>>({});
+  const [unlockCodeErrors, setUnlockCodeErrors] = useState<Record<string, string>>({});
+  const [unlockCodeLoading, setUnlockCodeLoading] = useState<Record<string, boolean>>({});
 
   const featuredScrollRef = useRef<HTMLDivElement>(null);
   const hotScrollRef = useRef<HTMLDivElement>(null);
@@ -148,6 +152,10 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const adminLockStatusMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
     adminOffers.forEach((ao) => {
+      if (!isOfferwallLockEnabled(ao.provider)) {
+        map.set(ao.id, { locked: false, reason: "" });
+        return;
+      }
       if (ao.status === "locked") {
         const evalResult = evaluateLockRules(user, lockRules);
         map.set(ao.id, evalResult.locked ? evalResult : { locked: true, reason: "Locked by admin" });
@@ -161,6 +169,15 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const lockedProviderMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
     adminOffers.forEach((ao) => {
+      if (!isOfferwallLockEnabled(ao.provider)) {
+        map.set(ao.provider, { locked: false, reason: "" });
+        return;
+      }
+      // Check if user unlocked this provider via special unlock code
+      if (isOfferwallUnlockedByCode(user.id, ao.provider)) {
+        map.set(ao.provider, { locked: false, reason: "" });
+        return;
+      }
       if (ao.status === "locked" || ao.status === "inactive") {
         const existing = map.get(ao.provider);
         if (!existing || existing.locked) {
@@ -523,6 +540,57 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
                     <div className="mt-3 w-full py-2 rounded-xl bg-slate-800/60 text-slate-500 text-[9px] font-semibold text-center border border-white/5 cursor-not-allowed relative z-10">
                       <Lock className="w-3 h-3 inline mr-1" /> Unavailable
+                    </div>
+
+                    <div className="mt-2 relative z-10 w-full">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex-1 h-px bg-white/5" />
+                        <span className="text-[7px] text-slate-600 font-mono">HAVE AN UNLOCK CODE?</span>
+                        <div className="flex-1 h-px bg-white/5" />
+                      </div>
+                      <div className="flex gap-1">
+                        <input
+                          value={unlockCodeInputs[name] || ""}
+                          onChange={(e) => { setUnlockCodeInputs({ ...unlockCodeInputs, [name]: e.target.value.toUpperCase() }); setUnlockCodeErrors({ ...unlockCodeErrors, [name]: "" }); }}
+                          placeholder="CODE"
+                          className="flex-1 bg-slate-900/80 border border-white/10 rounded-lg px-2 py-1.5 text-[9px] font-mono font-bold text-white placeholder-slate-700 uppercase tracking-wider focus:outline-none focus:border-cyan-500/30"
+                        />
+                        <button
+                          onClick={() => {
+                            const input = (unlockCodeInputs[name] || "").trim();
+                            if (!input) { setUnlockCodeErrors({ ...unlockCodeErrors, [name]: "Enter a code" }); return; }
+                            setUnlockCodeLoading({ ...unlockCodeLoading, [name]: true });
+                            setTimeout(() => {
+                              const result = validateOfferwallUnlockCode(input, name);
+                              if (!result.valid) {
+                                setUnlockCodeErrors({ ...unlockCodeErrors, [name]: result.error || "Invalid code" });
+                                setUnlockCodeLoading({ ...unlockCodeLoading, [name]: false });
+                                return;
+                              }
+                              incrementUnlockCodeUsage(result.record!.id);
+                              addUserUnlockedOfferwall({
+                                id: `uo-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+                                userId: user.id,
+                                offerwallId: name,
+                                unlockCodeId: result.record!.id,
+                                unlockedAt: new Date().toISOString(),
+                              });
+                              setUnlockCodeLoading({ ...unlockCodeLoading, [name]: false });
+                              setLockedUnlockTick((t) => t + 1);
+                            }, 500);
+                          }}
+                          disabled={unlockCodeLoading[name]}
+                          className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 text-cyan-300 font-bold text-[8px] border border-cyan-500/20 hover:from-cyan-600/30 hover:border-cyan-500/40 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {unlockCodeLoading[name] ? "..." : "Unlock"}
+                        </button>
+                      </div>
+                      {unlockCodeErrors[name] && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
+                          <span className="text-[7px] text-rose-300 font-mono">{unlockCodeErrors[name]}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

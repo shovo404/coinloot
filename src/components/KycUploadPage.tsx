@@ -134,6 +134,7 @@ export default function KycUploadPage({ user, setUser }: KycUploadPageProps) {
   }
 
   const startCamera = useCallback(async () => {
+    setError("");
     setCameraError("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
@@ -144,8 +145,14 @@ export default function KycUploadPage({ user, setUser }: KycUploadPageProps) {
           videoRef.current.srcObject = stream;
         }
       }, 100);
-    } catch {
-      setCameraError("Camera access denied. Please allow camera permissions in your browser settings.");
+    } catch (err) {
+      const msg = err instanceof DOMException && err.name === "NotAllowedError"
+        ? "Camera permission denied. Please allow camera access in your browser settings and try again."
+        : err instanceof DOMException && err.name === "NotFoundError"
+        ? "No camera found. Please connect a camera and try again."
+        : "Camera access denied. Please allow camera permissions in your browser settings.";
+      setError(msg);
+      setCameraError(msg);
     }
   }, []);
 

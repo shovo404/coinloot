@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { Coins, Lock, Key } from "lucide-react";
+import { Coins, Lock, Key, Sparkles, CheckCircle, AlertCircle, Gift } from "lucide-react";
 import { UserProfile } from "../types";
-import { LockedOfferwallConfig, isOfferwallUnlocked, addUserUnlock } from "../utils/lockedOfferwallDB";
+import { LockedOfferwallConfig, isOfferwallUnlocked, addUserUnlock, isOfferwallUnlockedByCode, validateOfferwallUnlockCode, incrementUnlockCodeUsage, addUserUnlockedOfferwall, validatePromoCode, incrementPromoUsage, hasUserUsedPromoCode, markUserPromoUsed, isOfferwallLockEnabled } from "../utils/lockedOfferwallDB";
 import { getProviderInfo, getProviderLogoUrl } from "../utils/providerLogos";
-import PromoUnlockModal from "./PromoUnlockModal";
 
 interface Props {
   key?: string;
@@ -29,7 +28,14 @@ function formatName(name: string): { first: string; rest: string; isGradient: bo
 
 export default function LockedOfferwallCard({ config, user, onUnlocked }: Props) {
   const [visible, setVisible] = useState(false);
-  const [promoOpen, setPromoOpen] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState("");
+  const [promoSuccess, setPromoSuccess] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [codeError, setCodeError] = useState("");
+  const [codeSuccess, setCodeSuccess] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 100);
@@ -37,9 +43,10 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
   }, []);
 
   if (!config.isLocked) return null;
+  if (!isOfferwallLockEnabled(config.providerName)) return null;
 
   const provider = getProviderInfo(config.providerName);
-  const alreadyUnlocked = isOfferwallUnlocked(user.id, config.providerName);
+  const alreadyUnlocked = isOfferwallUnlocked(user.id, config.providerName) || isOfferwallUnlockedByCode(user.id, config.providerName);
   const earned = user.total_earned_coins;
   const required = config.requiredCoins;
   const progress = Math.min(100, Math.round((earned / required) * 100));
@@ -56,6 +63,57 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
     });
     setTimeout(() => onUnlocked(config.providerName), 0);
   }
+
+  const handlePromoSubmit = () => {
+    const trimmed = promoInput.trim();
+    if (!trimmed) { setPromoError("Please enter a promo code"); return; }
+    setPromoLoading(true);
+    setPromoError("");
+    setTimeout(() => {
+      const validated = validatePromoCode(trimmed, config.providerName);
+      if (!validated) {
+        setPromoError("Invalid or expired promo code");
+        setPromoLoading(false);
+        return;
+      }
+      if (hasUserUsedPromoCode(user.id, validated.id)) {
+        setPromoError("You have already used this promo code");
+        setPromoLoading(false);
+        return;
+      }
+      markUserPromoUsed(user.id, validated.id);
+      incrementPromoUsage(validated.id);
+      setPromoSuccess(true);
+      setPromoLoading(false);
+      setTimeout(() => onUnlocked(config.providerName), 1000);
+    }, 800);
+  };
+
+  const handleUnlockSubmit = () => {
+    const trimmed = codeInput.trim();
+    if (!trimmed) { setCodeError("Please enter an unlock code"); return; }
+    setCodeLoading(true);
+    setCodeError("");
+    setTimeout(() => {
+      const result = validateOfferwallUnlockCode(trimmed, config.providerName);
+      if (!result.valid) {
+        setCodeError(result.error || "Invalid Unlock Code");
+        setCodeLoading(false);
+        return;
+      }
+      incrementUnlockCodeUsage(result.record!.id);
+      addUserUnlockedOfferwall({
+        id: `uo-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        userId: user.id,
+        offerwallId: config.providerName,
+        unlockCodeId: result.record!.id,
+        unlockedAt: new Date().toISOString(),
+      });
+      setCodeSuccess(true);
+      setCodeLoading(false);
+      setTimeout(() => onUnlocked(config.providerName), 1000);
+    }, 800);
+  };
 
   if (alreadyUnlocked) return null;
 
@@ -95,8 +153,8 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
         className={`card-premium-enter relative flex flex-col rounded-3xl overflow-hidden transition-all duration-500 w-full border hover:scale-[1.015]`}
         style={{
           aspectRatio: "3/4",
-          minHeight: "380px",
-          maxHeight: "460px",
+          minHeight: "420px",
+          maxHeight: "540px",
           borderColor: "rgba(124,58,237,0.25)",
           animation: "borderNeon 3s ease-in-out infinite, fadeSlideUp 0.5s ease-out",
           background: "linear-gradient(160deg, #0B0E1A 0%, #111827 40%, #18192D 100%)",
@@ -254,26 +312,124 @@ export default function LockedOfferwallCard({ config, user, onUnlocked }: Props)
             </div>
           </div>
 
-          <button
-            onClick={() => setPromoOpen(true)}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:from-purple-600/30 hover:border-purple-500/40 transition-all cursor-pointer flex items-center justify-center gap-2 tracking-wider uppercase"
-          >
-            <Key className="w-3.5 h-3.5" />
-            Enter Promo Code
-          </button>
-        </div>
+          {/* ── Inline Promo Code Section ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="flex-1 h-px bg-white/5" />
+              <span className="text-[7px] text-slate-600 font-mono tracking-wider">PROMO CODE</span>
+              <div className="flex-1 h-px bg-white/5" />
+            </div>
 
-        {promoOpen && (
-          <PromoUnlockModal
-            offerwallName={config.providerName}
-            userId={user.id}
-            onSuccess={() => {
-              setPromoOpen(false);
-              onUnlocked(config.providerName);
-            }}
-            onClose={() => setPromoOpen(false)}
-          />
-        )}
+            {promoSuccess ? (
+              <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="text-[11px] text-emerald-300 font-bold">Offerwall Unlocked Successfully</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Gift className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                  <input
+                    value={promoInput}
+                    onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(""); }}
+                    placeholder="Enter Promo Code"
+                    className="w-full bg-slate-950/80 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-xs font-mono font-bold text-white placeholder-slate-700 uppercase tracking-widest focus:outline-none focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/20 transition-all"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !promoLoading) handlePromoSubmit();
+                    }}
+                  />
+                </div>
+
+                {promoError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                    <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                    <span className="text-[9px] text-rose-300 font-medium">{promoError}</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={handlePromoSubmit}
+                  disabled={promoLoading}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:from-purple-600/30 hover:border-purple-500/40 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 tracking-wider uppercase"
+                >
+                  {promoLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      Validating...
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <Gift className="w-3.5 h-3.5" />
+                      Redeem Promo Code
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Inline Unlock Code Section ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="flex-1 h-px bg-white/5" />
+              <span className="text-[7px] text-slate-600 font-mono tracking-wider">SPECIAL UNLOCK CODE</span>
+              <div className="flex-1 h-px bg-white/5" />
+            </div>
+
+            {codeSuccess ? (
+              <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="text-[11px] text-emerald-300 font-bold">Offerwall Unlocked Successfully</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                  <input
+                    value={codeInput}
+                    onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeError(""); }}
+                    placeholder="Enter Unlock Code"
+                    className="w-full bg-slate-950/80 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-xs font-mono font-bold text-white placeholder-slate-700 uppercase tracking-widest focus:outline-none focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !codeLoading) handleUnlockSubmit();
+                    }}
+                  />
+                </div>
+
+                {codeError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                    <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                    <span className="text-[9px] text-rose-300 font-medium">{codeError}</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleUnlockSubmit}
+                  disabled={codeLoading}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600/20 to-blue-600/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/20 hover:from-cyan-600/30 hover:border-cyan-500/40 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 tracking-wider uppercase"
+                >
+                  {codeLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      Validating...
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Unlock Offerwall
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ── Bottom Pagination ── */}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">

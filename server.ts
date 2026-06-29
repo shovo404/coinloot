@@ -161,7 +161,7 @@ interface VpnProvider {
   id: string;
   name: string;
   checkIp(ip: string, apiKey: string, timeout: number, sensitivity: number): Promise<{ success: boolean; data?: ProviderResult; error?: string; httpStatus?: number }>;
-  testKey(apiKey: string, timeout: number): Promise<{ success: boolean; error?: string }>;
+  testKey(apiKey: string, timeout: number): Promise<{ success: boolean; error?: string; httpStatus?: number; rawResponse?: any }>;
 }
 
 // ── VPN Configuration ──
@@ -261,8 +261,18 @@ const proxycheckProvider: VpnProvider = {
         return { success: false, error: parsed.message || "ProxyCheck API error", httpStatus };
       }
 
+      // Handle denied/blocked/limit statuses with descriptive messages
+      const statusMessages: Record<string, string> = {
+        denied: "API Access Denied — your API key may be invalid, suspended, or the server IP is not whitelisted",
+        blocked: "API access blocked — the key or IP has been blocked by ProxyCheck.io",
+        limit: "Rate limit exceeded — your ProxyCheck.io query limit has been reached",
+      };
+      if (parsed.status && statusMessages[parsed.status]) {
+        return { success: false, error: statusMessages[parsed.status], httpStatus };
+      }
+
       if (parsed.status !== "ok") {
-        return { success: false, error: `Unexpected status: ${parsed.status}`, httpStatus };
+        return { success: false, error: `Unexpected status: ${parsed.status} (HTTP ${httpStatus})`, httpStatus };
       }
 
       const ipData = parsed[ip];
@@ -326,38 +336,44 @@ const proxycheckProvider: VpnProvider = {
   async testKey(apiKey: string, timeout: number) {
     const key = apiKey || process.env.PROXYCHECK_API_KEY || process.env.VPN_API_KEY || "";
     if (!key) {
-      return { success: false, error: "No API key provided" };
+      return { success: false, error: "No API key provided", httpStatus: 0, rawResponse: null };
     }
     try {
       // Test with a known IP (Google DNS)
       const resp = await fetch(`https://proxycheck.io/v2/8.8.8.8?key=${key}&vpn=1&risk=1`, {
         signal: AbortSignal.timeout(timeout),
       });
+      const httpStatus = resp.status;
       const text = await resp.text();
       let parsed: any;
       try {
         parsed = JSON.parse(text);
       } catch {
-        return { success: false, error: "Invalid response from ProxyCheck.io" };
+        return { success: false, error: `Invalid JSON response from ProxyCheck.io (HTTP ${httpStatus})`, httpStatus, rawResponse: text.substring(0, 500) };
       }
-      if (parsed.status === "error") {
-        return { success: false, error: parsed.message || "Invalid API key" };
-      }
+
+      // Map known ProxyCheck status values to descriptive errors
+      const statusMessages: Record<string, string> = {
+        denied: "API Access Denied — your API key may be invalid, suspended, or the server IP is not whitelisted",
+        error: parsed.message || "ProxyCheck API returned an error",
+        blocked: "API access blocked — the key or IP has been blocked by ProxyCheck.io",
+        limit: "Rate limit exceeded — your ProxyCheck.io query limit has been reached",
+      };
+
       if (parsed.status === "ok") {
-        return { success: true };
+        return { success: true, httpStatus, rawResponse: parsed };
       }
-      return { success: false, error: `Unexpected status: ${parsed.status}` };
+      if (parsed.status && statusMessages[parsed.status]) {
+        return { success: false, error: statusMessages[parsed.status], httpStatus, rawResponse: parsed };
+      }
+      return { success: false, error: `Unexpected status: ${parsed.status} (HTTP ${httpStatus})`, httpStatus, rawResponse: parsed };
     } catch (err: any) {
-      return { success: false, error: err.message || "Connection failed" };
+      return { success: false, error: err.message || "Connection failed", httpStatus: 0, rawResponse: null };
     }
   },
 };
 
-// ── Provider Registry ──
-
-const providers: Record<string, VpnProvider> = {
-  proxycheck: proxycheckProvider,
-};
+// ── Provider Registry (defined in full below with all providers) ──
 
 // ── In-memory VPN detection logs ──
 
@@ -454,6 +470,42 @@ app.post("/api/vpn/test", async (req, res) => {
 
   res.json(result);
 });
+
+// ── IPQualityScore Provider ──
+const ipqualityscoreProvider: VpnProvider = {
+  id: "ipqualityscore",
+  name: "IPQualityScore",
+
+  async checkIp(ip: string, apiKey: string, timeout: number, sensitivity: number) {
+    return { success: false, error: "IPQualityScore provider not fully implemented yet. Use ProxyCheck.io instead." };
+  },
+
+  async testKey(apiKey: string, timeout: number) {
+    return { success: false, error: "IPQualityScore provider not fully implemented yet. Use ProxyCheck.io instead." };
+  },
+};
+
+// ── IPHub Provider ──
+const iphubProvider: VpnProvider = {
+  id: "iphub",
+  name: "IPHub",
+
+  async checkIp(ip: string, apiKey: string, timeout: number, sensitivity: number) {
+    return { success: false, error: "IPHub provider not fully implemented yet. Use ProxyCheck.io instead." };
+  },
+
+  async testKey(apiKey: string, timeout: number) {
+    return { success: false, error: "IPHub provider not fully implemented yet. Use ProxyCheck.io instead." };
+  },
+};
+
+// ── Provider Registry (update to include all providers) ──
+
+const providers: Record<string, VpnProvider> = {
+  proxycheck: proxycheckProvider,
+  ipqualityscore: ipqualityscoreProvider,
+  iphub: iphubProvider,
+};
 
 // ── API: Get available providers ──
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Shield, Key, Globe, Wifi, AlertTriangle, CheckCircle, XCircle, RefreshCw, Save, Server, Clock, Eye, EyeOff, Sliders, Download } from "lucide-react";
+import Loader from "./Loader";
 
 interface VpnApiConfigSectionProps {
   showNotif: (type: "success" | "error", message: string) => void;

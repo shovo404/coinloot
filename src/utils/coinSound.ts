@@ -85,3 +85,61 @@ export function playNotificationSound() {
     // Non-critical
   }
 }
+
+/**
+ * Level-up fanfare sound synthesized via Web Audio API.
+ * Distinct from the coin sound — richer, longer, ascending arpeggio.
+ */
+let lastLevelUpPlayTime = 0;
+const LEVEL_UP_MIN_INTERVAL = 2000;
+
+export function playLevelUpSound() {
+  const now = Date.now();
+  if (now - lastLevelUpPlayTime < LEVEL_UP_MIN_INTERVAL) return;
+  lastLevelUpPlayTime = now;
+
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContext;
+    if (ctx.state === "suspended") ctx.resume();
+
+    // Ascending arpeggio: C5 → E5 → G5 → C6 (3 notes)
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      const startTime = ctx.currentTime + i * 0.12;
+      osc.frequency.setValueAtTime(freq, startTime);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.01, startTime + 0.3);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.25, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.4);
+    });
+
+    // Sparkle overlay — short high-frequency noise
+    const bufferSize = ctx.sampleRate * 0.15;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.08));
+    }
+    const noise = ctx.createBufferSource();
+    const noiseGain = ctx.createGain();
+    noise.buffer = buffer;
+    noiseGain.gain.setValueAtTime(0.08, ctx.currentTime + 0.35);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    noise.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(ctx.currentTime + 0.35);
+    noise.stop(ctx.currentTime + 0.5);
+  } catch {
+    // Non-critical
+  }
+}

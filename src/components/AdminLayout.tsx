@@ -43,7 +43,13 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "rewards-challenges", label: "Rewards & Challenges", icon: Award },
   { id: "kyc", label: "KYC", icon: ShieldCheck },
   { id: "security", label: "Security", icon: ShieldAlert },
-  { id: "vpn-api", label: "VPN & Proxy", icon: Globe },
+  {
+    id: "vpn", label: "VPN & Proxy", icon: Globe,
+    children: [
+      { id: "vpn-api", label: "API Configuration" },
+      { id: "vpn-control", label: "Control Center" },
+    ],
+  },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 

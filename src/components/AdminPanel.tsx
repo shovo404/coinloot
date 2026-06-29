@@ -10,11 +10,10 @@ import {
   Calendar, UserPlus, ExternalLink, MoreHorizontal, HardDrive, Signal, Circle,
   Sun, Moon, List, LayoutGrid, ArrowUpRight, ArrowDownRight, Gauge, Mail, History,
   ArrowLeft, MessageSquare, ChevronRight, User,
-  Megaphone, Database, ZoomIn,
+  Megaphone, Database, ZoomIn, Archive,
 } from "lucide-react";
 import { UserProfile, WithdrawalRequest, OfferwallConfig, PromoCode, AdminLog, SiteSettings, WithdrawalMethodConfig } from "../types";
 import { Ticket } from "./SupportTicket";
-import VpnApiConfigSection from "./VpnApiConfigSection";
 import AdminNotificationCenter from "./AdminNotificationCenter";
 import AdminNotificationPrefs from "./AdminNotificationPrefs";
 import { playCoinSound } from "../utils/coinSound";
@@ -23,9 +22,11 @@ import { getAllKycRecords, getKycStats, getKycRecord, approveKycByUserId, reject
 import { getTickerSettings, saveTickerSettings, TickerSettings } from "../utils/activityFeed";
 import { createAdminNotification, NotificationPriority } from "../utils/adminNotifier";
 import AdminLockedOfferwalls from "./AdminLockedOfferwalls";
+import { updateOfferwallUnlockCode, deleteOfferwallUnlockCode, getOfferwallUnlockCodes } from "../utils/lockedOfferwallDB";
 import { getSupabaseClient } from "../lib/supabase";
+import VpnPage from "./VpnPage";
 import { realtimeManager } from "../lib/realtimeManager";
-import { updateWithdrawalStatus, adminResetPassword } from "../lib/supabaseService";
+import { updateWithdrawalStatus, adminResetPassword, deleteAuthUser, softDeleteUser, permanentDeleteUser, restoreUser } from "../lib/supabaseService";
 import * as AdminDb from "../lib/adminDb";
 import Loader from "./Loader";
 import { 
@@ -109,6 +110,8 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
   const [filterType, setFilterType] = useState("all");
   const [viewingRawResponse, setViewingRawResponse] = useState<VpnDetectionLog | null>(null);
   const [serverLogs, setServerLogs] = useState<VpnDetectionLog[]>([]);
+  const [scanningUserId, setScanningUserId] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<{username: string; result: any} | null>(null);
 
   const loadData = () => {
     setDetectionHistory(getDetectionHistory());
@@ -198,6 +201,28 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
     loadData();
   };
 
+  const handleScanUser = async (uid: string, uname: string) => {
+    setScanningUserId(uid);
+    try {
+      // Find the user's IP from detection logs
+      const logs = getUserIpLogs(500);
+      const userLog = logs.find(l => l.userId === uid);
+      const ipToScan = userLog?.ipAddress || "";
+
+      const resp = await fetch("/api/vpn/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip: ipToScan || undefined }),
+      });
+      const data = await resp.json();
+      setScanResult({ username: uname, result: data });
+      onAction(`Scan complete for ${uname}`);
+    } catch {
+      onAction(`Scan failed for ${uname}`);
+    }
+    setScanningUserId(null);
+  };
+
   return (
     <div className="lg:col-span-2 space-y-4">
       {/* Search and Stats */}
@@ -219,6 +244,13 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
           <span className="text-[9px] text-slate-500 font-mono">Unique IPs</span>
         </div>
       </div>
+      {flaggedUsers.length > 0 && (
+        <div className="flex justify-end">
+          <button onClick={() => { flaggedUsers.forEach((p, i) => setTimeout(() => handleScanUser(p.id, p.username), i * 1500)); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[8px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer flex items-center gap-1">
+            <RefreshCw className="w-3 h-3" /> Scan All Flagged ({flaggedUsers.length})
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="flex items-center gap-2 bg-slate-950/40 border border-white/5 rounded-2xl px-4 py-2.5">
@@ -291,6 +323,9 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
               {log.vpnProvider && <span className="text-[8px] font-mono text-cyan-400 w-16 truncate shrink-0" title={log.vpnProvider}>{log.vpnProvider}</span>}
               <span className="text-[8px] font-mono text-slate-600 truncate flex-1">{log.isp || log.org}</span>
               {log.fraudScore > 0 && <span className={`text-[8px] font-mono shrink-0 ${log.fraudScore >= 80 ? "text-rose-400" : "text-amber-400"}`}>{log.fraudScore}</span>}
+              <button onClick={(e) => { e.stopPropagation(); handleScanUser(log.userId, log.username); }} disabled={scanningUserId === log.userId} className="text-[7px] font-mono text-cyan-400 hover:text-cyan-300 shrink-0 disabled:opacity-50 cursor-pointer">
+                {scanningUserId === log.userId ? "..." : "🔄"}
+              </button>
               {log.rawResponse && <span className="text-[7px] text-cyan-500 shrink-0" title="View raw response">🔍</span>}
             </div>
           ))}
@@ -360,6 +395,9 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
                     ) : (
                       <button onClick={() => { restrictUser(p.id, 30, "VPN detected by system"); logRestrictionHistory({ id: `rh-${Date.now()}`, userId: p.id, username: p.username, action: "restricted", duration: 30, reason: "VPN detected by system", adminAction: `Restricted 30 min by ${username}`, timestamp: new Date().toISOString() }); onAction(`${p.username} restricted 30 min`); loadData(); }} className="px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[8px] font-bold hover:bg-amber-500/20 transition-all cursor-pointer">Restrict 30m</button>
                     )}
+                    <button onClick={() => handleScanUser(p.id, p.username)} disabled={scanningUserId === p.id} className="px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[8px] font-bold hover:bg-cyan-500/20 transition-all cursor-pointer disabled:opacity-50">
+                      {scanningUserId === p.id ? "..." : "Scan IP"}
+                    </button>
                     <button onClick={() => isBanned ? handleUnban(p.id) : handleBan(p.id, p.username)} className={`px-2 py-1 rounded-lg text-[8px] font-bold transition-all cursor-pointer ${isBanned ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"}`}>{isBanned ? "Unban" : "Ban"}</button>
                   </div>
                 </div>
@@ -392,6 +430,64 @@ function VpnControlCenter({ userId, username, profiles, onAction }: { userId: st
               <button onClick={() => setBanUserId(null)} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">Cancel</button>
               <button onClick={() => { const p = profiles.find((x) => x.id === banUserId); if (p) { handleBan(p.id, p.username); } setBanUserId(null); }} className="flex-1 py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer">Permanently Ban</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Result Modal */}
+      {scanResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => setScanResult(null)}>
+          <div className="max-w-lg w-full bg-slate-950 border border-white/10 rounded-3xl p-5 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setScanResult(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            <div className="flex items-center gap-2 mb-3">
+              <Shield className="w-4 h-4 text-cyan-400" />
+              <h3 className="text-sm font-bold text-white">Proxy Scan Result — {scanResult.username}</h3>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-white/5 space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">IP</span>
+                <span className="text-white font-bold">{scanResult.result.ip || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">VPN</span>
+                <span className={scanResult.result.isVpn ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>{scanResult.result.isVpn ? "YES" : "NO"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">Proxy</span>
+                <span className={scanResult.result.isProxy ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>{scanResult.result.isProxy ? "YES" : "NO"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">TOR</span>
+                <span className={scanResult.result.isTor ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>{scanResult.result.isTor ? "YES" : "NO"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">Hosting/VPS</span>
+                <span className={scanResult.result.isHosting ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>{scanResult.result.isHosting ? "YES" : "NO"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">Risk Score</span>
+                <span className={`font-bold ${scanResult.result.fraudScore >= 80 ? "text-rose-400" : scanResult.result.fraudScore >= 50 ? "text-amber-400" : "text-emerald-400"}`}>{scanResult.result.fraudScore}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">Detection Type</span>
+                <span className="text-cyan-400">{scanResult.result.detectionType || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">Country</span>
+                <span className="text-slate-300">{scanResult.result.country || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-slate-500">ISP</span>
+                <span className="text-slate-300">{scanResult.result.isp || "—"}</span>
+              </div>
+              {scanResult.result.rawResponse && (
+                <details className="mt-2">
+                  <summary className="text-[9px] text-cyan-400 font-mono cursor-pointer hover:text-cyan-300">Raw API Response</summary>
+                  <pre className="mt-2 bg-slate-950 border border-white/5 rounded-xl p-3 text-[8px] font-mono text-cyan-300 max-h-40 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(scanResult.result.rawResponse, null, 2)}</pre>
+                </details>
+              )}
+            </div>
+            <button onClick={() => setScanResult(null)} className="mt-3 w-full py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">Close</button>
           </div>
         </div>
       )}
@@ -878,13 +974,20 @@ function CampaignSubmissionsPanel({ campaign, submissions, onBack, onRefresh }: 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
 
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (submission: any) => {
     setReviewing(true);
     try {
       const sb = getSupabaseClient();
       if (!sb) return;
       const admin = await sb.auth.getUser();
-      await AdminDb.approveCampaignSubmission(id, admin.data.user?.id || "");
+      await AdminDb.approveCampaignSubmission(submission.id, admin.data.user?.id || "");
+      // Notify the user via localStorage + Supabase realtime
+      try {
+        const notifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
+        notifs.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, user_id: submission.user_id, title: "Campaign Reward Approved!", description: `Your "${submission.campaign_id}" submission was approved! +${submission.total_reward?.toLocaleString() || "0"} coins credited.`, time: new Date().toISOString(), category: "credit", unread: true });
+        localStorage.setItem("coinloot_notifications", JSON.stringify(notifs));
+      } catch {}
+      try { await sb.from("notifications").insert({ user_id: submission.user_id, title: "Campaign Reward Approved!", description: `Your "${submission.campaign_id}" submission was approved! +${submission.total_reward?.toLocaleString() || "0"} coins credited.`, category: "credit" }); } catch {}
       await onRefresh();
       alert("Submission approved! Coins rewarded.");
     } catch (e) { console.error(e); alert("Failed to approve"); }
@@ -967,7 +1070,7 @@ function CampaignSubmissionsPanel({ campaign, submissions, onBack, onRefresh }: 
 
               {s.status === "pending" && (
                 <div className="flex gap-2 mt-3">
-                  <button onClick={() => handleApprove(s.id)} disabled={reviewing} className="px-4 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                  <button onClick={() => handleApprove(s)} disabled={reviewing} className="px-4 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 text-[9px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1">
                     <CheckCircle className="w-3 h-3" /> Approve
                   </button>
                   <button onClick={() => handleReject(s.id)} disabled={reviewing} className="px-4 py-1.5 rounded-xl bg-red-500/10 text-red-400 text-[9px] font-bold hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1">
@@ -1685,6 +1788,22 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [editingOfferExt, setEditingOfferExt] = useState<string | null>(null);
   const [editOfferFull, setEditOfferFull] = useState<any>(null);
 
+  // ── Special Unlock Codes state ──
+  const [unlockCodes, setUnlockCodes] = useState<any[]>([]);
+  const [showAddUnlockCode, setShowAddUnlockCode] = useState(false);
+  const [newUnlockCode, setNewUnlockCode] = useState({ code: "", description: "", status: "active" as const, expiresAt: "", usageLimit: 0, unlockOfferwallIds: [] as string[] });
+  const [editUnlockCodeId, setEditUnlockCodeId] = useState<string | null>(null);
+  const [showUnlockCodeUsage, setShowUnlockCodeUsage] = useState<any>(null);
+
+  const loadUnlockCodes = () => {
+    try {
+      const codes = JSON.parse(localStorage.getItem("coinloot_offerwall_unlock_codes") || "[]");
+      setUnlockCodes(codes);
+    } catch { setUnlockCodes([]); }
+  };
+
+  useEffect(() => { loadUnlockCodes(); }, [activeSection]);
+
   const showNotif = (type: "success" | "error", message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 3000);
@@ -1885,59 +2004,89 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     }
   };
 
-  const handleDeleteUser = async (targetId: string) => {
-    const sb = getSupabaseClient();
-
-    // — Supabase cleanup —
-    if (sb) {
-      const tables = ["profiles", "withdrawals", "support_tickets", "kyc_records", "notifications", "earnings_history"];
-      for (const table of tables) {
-        try { await sb.from(table).delete().eq("id", targetId); } catch {}
-        try { await sb.from(table).delete().eq("user_id", targetId); } catch {}
-      }
+  // ── Soft Delete: marks user as deleted (email stays reserved, can be restored) ──
+  const handleSoftDeleteUser = async (targetId: string) => {
+    const result = await softDeleteUser(targetId);
+    if (!result.success) {
+      showNotif("error", `Soft delete failed: ${result.error}`);
+      return;
     }
 
-    // — localStorage cleanup —
-    // Remove from accounts
+    cleanupLocalStorage(targetId);
+
+    addLog("USER_SOFT_DELETED", "user", targetId, "Soft-deleted user account (can be restored)");
+    setProfilesRefreshKey(k => k + 1);
+    setDeleteModal(null);
+    showNotif("success", "User soft-deleted. Email reserved. Account can be restored.");
+  };
+
+  // ── Restore a soft-deleted user ──
+  const handleRestoreUser = async (targetId: string) => {
+    const result = await restoreUser(targetId);
+    if (!result.success) {
+      showNotif("error", `Restore failed: ${result.error}`);
+      return;
+    }
+    addLog("USER_RESTORED", "user", targetId, "Restored soft-deleted user account");
+    setProfilesRefreshKey(k => k + 1);
+    showNotif("success", "User account restored");
+  };
+
+  // ── Permanent Delete: removes user completely (email becomes available again) ──
+  const handlePermanentDeleteUser = async (targetId: string, targetEmail?: string) => {
+    const result = await permanentDeleteUser(targetId, targetEmail);
+
+    // — localStorage cleanup (cleanupLocalStorage already handles coinloot_accounts by profile.id) —
+    cleanupLocalStorage(targetId);
+
+    if (!result.success) {
+      addLog("USER_PERMANENT_DELETE_FAILED", "user", targetId, `Server deletion failed: ${result.error}`);
+      setProfilesRefreshKey(k => k + 1);
+      setDeleteModal(null);
+      showNotif("error", `Server deletion failed: ${result.error}. Local data removed but email may not be available for re-registration.`);
+      return;
+    }
+
+    addLog("USER_PERMANENTLY_DELETED", "user", targetId, "Permanently deleted user account");
+    setProfilesRefreshKey(k => k + 1);
+    setDeleteModal(null);
+    showNotif("success", "User permanently deleted. Email is now available for re-registration.");
+  };
+
+  // ── Shared localStorage cleanup helper ──
+  const cleanupLocalStorage = (targetId: string) => {
     const accs = getAccounts().filter((a) => a.profile.id !== targetId);
     saveAccounts(accs);
 
-    // Remove from user profiles list
     try {
       const profiles = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
       localStorage.setItem("coinloot_user_profiles", JSON.stringify(profiles.filter((p: any) => p.id !== targetId)));
     } catch {}
 
-    // Remove from restricted users
     try {
       const restricted = JSON.parse(localStorage.getItem("coinloot_restricted_users_v2") || "[]");
       localStorage.setItem("coinloot_restricted_users_v2", JSON.stringify(restricted.filter((r: any) => r.userId !== targetId)));
     } catch {}
 
-    // Remove from banned users
     try {
       const banned = JSON.parse(localStorage.getItem("coinloot_banned_users") || "[]");
       localStorage.setItem("coinloot_banned_users", JSON.stringify(banned.filter((b: string) => b !== targetId)));
     } catch {}
 
-    // Remove from detection history
     try {
-      const detections = JSON.parse(localStorage.getItem("coinloot_vpn_detection_logs") || "[]");
-      localStorage.setItem("coinloot_vpn_detection_logs", JSON.stringify(detections.filter((d: any) => d.userId !== targetId)));
+      const detections = JSON.parse(localStorage.getItem("coinloot_vpn_logs") || "[]");
+      localStorage.setItem("coinloot_vpn_logs", JSON.stringify(detections.filter((d: any) => d.userId !== targetId)));
     } catch {}
 
-    // Remove user-specific notifications
     try {
       const notifs = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
       localStorage.setItem("coinloot_notifications", JSON.stringify(notifs.filter((n: any) => n.user_id !== targetId)));
     } catch {}
 
-    // Remove support tickets
     try {
       const tickets = JSON.parse(localStorage.getItem("coinloot_support_tickets") || "[]");
       const userTickets = tickets.filter((t: any) => t.userId !== targetId && t.user_id !== targetId);
       localStorage.setItem("coinloot_support_tickets", JSON.stringify(userTickets));
-      // Remove ticket messages
       for (const t of tickets) {
         if (t.userId === targetId || t.user_id === targetId) {
           localStorage.removeItem(`coinloot_support_tickets_messages_${t.id}`);
@@ -1945,28 +2094,20 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       }
     } catch {}
 
-    // Remove KYC records
     try {
       const kycRecords = JSON.parse(localStorage.getItem("coinloot_kyc_records") || "[]");
       localStorage.setItem("coinloot_kyc_records", JSON.stringify(kycRecords.filter((k: any) => k.userId !== targetId)));
     } catch {}
 
-    // Remove from IP logs
     try {
-      const ipLogs = JSON.parse(localStorage.getItem("coinloot_ip_logs") || "[]");
-      localStorage.setItem("coinloot_ip_logs", JSON.stringify(ipLogs.filter((l: any) => l.userId !== targetId)));
+      const ipLogs = JSON.parse(localStorage.getItem("coinloot_user_ip_logs") || "[]");
+      localStorage.setItem("coinloot_user_ip_logs", JSON.stringify(ipLogs.filter((l: any) => l.userId !== targetId)));
     } catch {}
 
-    // Remove restriction history entries
     try {
       const rh = JSON.parse(localStorage.getItem("coinloot_restriction_history") || "[]");
       localStorage.setItem("coinloot_restriction_history", JSON.stringify(rh.filter((e: any) => e.userId !== targetId)));
     } catch {}
-
-    addLog("USER_DELETED", "user", targetId, "Deleted user account with full cleanup");
-    setProfilesRefreshKey(k => k + 1);
-    setDeleteModal(null);
-    showNotif("success", "User permanently deleted");
   };
 
   const handleUpdateProfile = async (targetId: string, updates: Partial<UserProfile>) => {
@@ -3161,6 +3302,161 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
           {/* ── Promo Codes ── */}
           <AdminLockedOfferwalls section="locked-offers-promos" onBack={goBack} showNotif={showNotif} />
+
+          {/* ═══════════════════ SPECIAL UNLOCK CODES ═══════════════════ */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2"><Key className="w-4 h-4 text-cyan-400" /> Special Unlock Codes</h2>
+              <button onClick={() => { setShowAddUnlockCode(!showAddUnlockCode); setEditUnlockCodeId(null); if (!showAddUnlockCode) setNewUnlockCode({ code: "", description: "", status: "active", expiresAt: "", usageLimit: 0, unlockOfferwallIds: [] }); }} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 text-cyan-300 text-[9px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer">
+                <Plus className="w-3 h-3" /> {showAddUnlockCode ? "Cancel" : "Create Code"}
+              </button>
+            </div>
+
+            {/* ── Stats ── */}
+            {unlockCodes.length > 0 && (
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5">
+                  <span className="block text-lg font-bold font-mono text-white">{unlockCodes.length}</span>
+                  <span className="text-[8px] text-slate-500 font-mono">Total Codes</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5">
+                  <span className="block text-lg font-bold font-mono text-emerald-400">{unlockCodes.filter((c: any) => c.status === "active").length}</span>
+                  <span className="text-[8px] text-slate-500 font-mono">Active Codes</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5">
+                  <span className="block text-lg font-bold font-mono text-cyan-400">{unlockCodes.reduce((sum: number, c: any) => sum + (c.usageCount || 0), 0)}</span>
+                  <span className="text-[8px] text-slate-500 font-mono">Total Uses</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── Add/Edit Form ── */}
+            {showAddUnlockCode && (
+              <div className="p-4 rounded-2xl bg-slate-900/40 border border-cyan-500/10 mb-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[8px] text-slate-500 uppercase font-mono block mb-1">Code</label>
+                    <input value={newUnlockCode.code} onChange={(e) => setNewUnlockCode({ ...newUnlockCode, code: e.target.value.toUpperCase() })} placeholder="e.g. VIP2026" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white uppercase placeholder-slate-600" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] text-slate-500 uppercase font-mono block mb-1">Description</label>
+                    <input value={newUnlockCode.description} onChange={(e) => setNewUnlockCode({ ...newUnlockCode, description: e.target.value })} placeholder="e.g. Unlock all premium" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] text-slate-500 uppercase font-mono block mb-1">Expires At</label>
+                    <input type="date" value={newUnlockCode.expiresAt} onChange={(e) => setNewUnlockCode({ ...newUnlockCode, expiresAt: e.target.value })} className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] text-slate-500 uppercase font-mono block mb-1">Usage Limit</label>
+                    <input type="number" value={newUnlockCode.usageLimit || ""} onChange={(e) => setNewUnlockCode({ ...newUnlockCode, usageLimit: parseInt(e.target.value) || 0 })} placeholder="0 = unlimited" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[8px] text-slate-500 uppercase font-mono block mb-1">Unlocks Offerwalls</label>
+                  <div className="flex flex-wrap gap-2">
+                    {offerwallProviders.map((p: any) => {
+                      const selected = newUnlockCode.unlockOfferwallIds.includes(p.name);
+                      return (
+                        <button key={p.name} onClick={() => setNewUnlockCode({ ...newUnlockCode, unlockOfferwallIds: selected ? newUnlockCode.unlockOfferwallIds.filter((n) => n !== p.name) : [...newUnlockCode.unlockOfferwallIds, p.name] })}
+                          className={`px-2.5 py-1 rounded-lg text-[8px] font-bold border transition-all cursor-pointer ${selected ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" : "bg-slate-800/60 text-slate-400 border-white/5 hover:border-cyan-500/20"}`}
+                        >{p.name}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => {
+                    if (!newUnlockCode.code.trim()) { showNotif("error", "Code is required"); return; }
+                    if (newUnlockCode.unlockOfferwallIds.length === 0) { showNotif("error", "Select at least one offerwall"); return; }
+                    const codes: any[] = JSON.parse(localStorage.getItem("coinloot_offerwall_unlock_codes") || "[]");
+                    if (editUnlockCodeId) {
+                      const idx = codes.findIndex((c) => c.id === editUnlockCodeId);
+                      if (idx >= 0) { codes[idx] = { ...codes[idx], ...newUnlockCode, expiresAt: newUnlockCode.expiresAt || null, updatedAt: new Date().toISOString() }; }
+                    } else {
+                      if (codes.some((c: any) => c.code.toUpperCase() === newUnlockCode.code.toUpperCase())) { showNotif("error", "Code already exists"); return; }
+                      codes.push({ id: `uc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, ...newUnlockCode, expiresAt: newUnlockCode.expiresAt || null, usageCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+                    }
+                    localStorage.setItem("coinloot_offerwall_unlock_codes", JSON.stringify(codes));
+                    showNotif("success", editUnlockCodeId ? "Unlock code updated" : "Unlock code created");
+                    setShowAddUnlockCode(false);
+                    setEditUnlockCodeId(null);
+                    loadUnlockCodes();
+                    addLog(editUnlockCodeId ? "UNLOCK_CODE_UPDATED" : "UNLOCK_CODE_CREATED", "unlock_code", "", `${editUnlockCodeId ? "Updated" : "Created"} code: ${newUnlockCode.code}`);
+                  }} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 text-cyan-300 text-[9px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all cursor-pointer">
+                    {editUnlockCodeId ? "Update Code" : "Create Code"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Codes List ── */}
+            {unlockCodes.length > 0 ? (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {unlockCodes.map((code: any) => (
+                  <div key={code.id} className="p-3 rounded-2xl bg-slate-900/40 border border-white/5 flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold font-mono text-cyan-300">{code.code}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[7px] font-bold ${code.status === "active" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800/60 text-slate-400 border border-white/5"}`}>{code.status}</span>
+                        {code.expiresAt && new Date(code.expiresAt) < new Date() && <span className="text-[7px] text-rose-400 font-bold">EXPIRED</span>}
+                      </div>
+                      {code.description && <p className="text-[8px] text-slate-500 font-mono mt-0.5 truncate">{code.description}</p>}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[7px] text-slate-500 font-mono">Unlocks: {code.unlockOfferwallIds?.join(", ") || "—"}</span>
+                        <span className="text-[7px] text-cyan-400 font-mono">Uses: {code.usageCount || 0}{code.usageLimit > 0 ? `/${code.usageLimit}` : "/∞"}</span>
+                        {code.expiresAt && <span className="text-[7px] text-slate-500 font-mono">Expires: {new Date(code.expiresAt).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0 ml-3">
+                      <button onClick={() => {
+                        setEditUnlockCodeId(code.id);
+                        setNewUnlockCode({ code: code.code, description: code.description || "", status: code.status, expiresAt: code.expiresAt ? code.expiresAt.split("T")[0] : "", usageLimit: code.usageLimit || 0, unlockOfferwallIds: code.unlockOfferwallIds || [] });
+                        setShowAddUnlockCode(true);
+                      }} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit"><Edit className="w-3 h-3" /></button>
+                      <button onClick={() => {
+                        updateOfferwallUnlockCode(code.id, { status: code.status === "active" ? "inactive" : "active" });
+                        loadUnlockCodes();
+                        showNotif("success", `Code ${code.status === "active" ? "deactivated" : "activated"}`);
+                      }} className={`p-1.5 rounded-lg transition-all cursor-pointer border ${code.status === "active" ? "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"}`} title={code.status === "active" ? "Deactivate" : "Activate"}>
+                        {code.status === "active" ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                      </button>
+                      <button onClick={() => {
+                        const all: any[] = JSON.parse(localStorage.getItem("coinloot_user_unlocked_offerwalls") || "[]");
+                        const usage = all.filter((u: any) => u.unlockCodeId === code.id);
+                        setShowUnlockCodeUsage({ code: code.code, usage });
+                      }} className="p-1.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 transition-all cursor-pointer" title="View Usage"><BarChart3 className="w-3 h-3" /></button>
+                      <button onClick={() => { deleteOfferwallUnlockCode(code.id); loadUnlockCodes(); showNotif("success", "Code deleted"); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer" title="Delete"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 text-center py-4">No unlock codes created yet</p>
+            )}
+          </div>
+
+          {/* ── Unlock Code Usage Modal ── */}
+          {showUnlockCodeUsage && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => setShowUnlockCodeUsage(null)}>
+              <div className="max-w-lg w-full bg-slate-950 border border-white/10 rounded-3xl p-5 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => setShowUnlockCodeUsage(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+                <h3 className="text-sm font-bold text-white mb-1">Code Usage: <span className="text-cyan-400">{showUnlockCodeUsage.code}</span></h3>
+                <p className="text-[9px] text-slate-500 font-mono mb-3">{showUnlockCodeUsage.usage.length} total uses</p>
+                {showUnlockCodeUsage.usage.length > 0 ? (
+                  <div className="space-y-1 max-h-60 overflow-y-auto">
+                    {showUnlockCodeUsage.usage.map((u: any) => (
+                      <div key={u.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-white/5">
+                        <span className="text-[9px] text-white font-mono">{u.userId}</span>
+                        <span className="text-[8px] text-slate-400 font-mono">{u.offerwallId}</span>
+                        <span className="text-[7px] text-slate-500 font-mono">{new Date(u.unlockedAt).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="text-xs text-slate-500 text-center py-4">No one has used this code yet</p>}
+                <button onClick={() => setShowUnlockCodeUsage(null)} className="mt-3 w-full py-2 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">Close</button>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -4156,8 +4452,24 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
+    // ═══ VPN & PROXY PAGE ═══
+    if (section === "vpn" || section === "vpn-api" || section === "vpn-control") {
+      return (
+        <VpnPage
+          user={user}
+          profiles={profiles}
+          vpnSettings={vpnSettings}
+          setVpnSettings={setVpnSettings}
+          autoRestrictRules={autoRestrictRules}
+          setAutoRestrictRules={setAutoRestrictRules}
+          showNotif={showNotif}
+          onBack={goBack}
+        />
+      );
+    }
+
     // ═══ SECURITY ═══
-    if (section === "security" || section === "fraud" || section === "logs" || section === "vpn-control" || section === "vpn-api") {
+    if (section === "security" || section === "fraud" || section === "logs") {
       const logs = getLogs();
       const fraudUsers = profiles.filter((p) => p.vpn_detected);
       const restrictedUsers = getRestrictedUsers();
@@ -4363,21 +4675,7 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 </div>
               </div>
             )}
-            {section === "vpn-control" && (
-              <VpnControlCenter
-                userId={user?.id || ""}
-                username={user?.username || "Admin"}
-                profiles={profiles}
-                onAction={(msg) => showNotif("success", msg)}
-              />
-            )}
-
-            {/* ── VPN API Configuration ── */}
-            {section === "vpn-api" && (
-              <div className="lg:col-span-2 space-y-4">
-                <VpnApiConfigSection showNotif={showNotif} />
-              </div>
-            )}
+            {/* VPN sections are now handled by the VpnPage component above */}
           </div>
         </div>
       );
@@ -4967,7 +5265,7 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
         </div>
       )}
 
-      {/* Delete User Confirmation Modal */}
+      {/* Delete User Confirmation Modal — Soft Delete + Permanent Delete */}
       {deleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md" onClick={() => setDeleteModal(null)}>
           <div className="max-w-sm w-full bg-slate-950 border border-white/10 rounded-3xl p-6 relative animate-zoom-in shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -4975,8 +5273,8 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
             <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="w-6 h-6 text-rose-400" />
             </div>
-            <h3 className="text-base font-bold text-white text-center mb-1">Permanently Delete User?</h3>
-            <p className="text-[10px] text-slate-400 font-mono text-center mb-4">This action cannot be undone.</p>
+            <h3 className="text-base font-bold text-white text-center mb-1">Delete User</h3>
+            <p className="text-[10px] text-slate-400 font-mono text-center mb-4">Choose how to handle this user.</p>
 
             <div className="bg-slate-900/60 rounded-2xl p-4 space-y-2 mb-5 border border-white/5">
               <div className="flex items-center justify-between">
@@ -4991,21 +5289,28 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
                 <span className="text-[9px] text-slate-500 font-mono">Balance</span>
                 <span className="text-[10px] text-emerald-400 font-mono font-bold">{deleteModal.balance}</span>
               </div>
-              <div className="border-t border-white/5 pt-2 mt-2">
-                <p className="text-[8px] text-rose-400/70 font-mono leading-relaxed">
-                  This will permanently remove the user's account, profile data, withdrawal requests,
-                  support tickets, KYC records, notifications, detection logs, and all associated data
-                  from both localStorage and Supabase.
-                </p>
-              </div>
             </div>
 
-            <div className="flex gap-2">
-              <button onClick={() => setDeleteModal(null)} className="flex-1 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold hover:border-white/20 transition-all cursor-pointer">
-                Cancel
+            <div className="space-y-2">
+              {/* Soft Delete */}
+              <button
+                onClick={() => handleSoftDeleteUser(deleteModal.userId)}
+                className="w-full py-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/25 text-[10px] font-bold hover:bg-amber-500/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Archive className="w-3.5 h-3.5" /> Soft Delete (Reserve Email — Restorable)
               </button>
-              <button onClick={() => handleDeleteUser(deleteModal.userId)} className="flex-1 py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                <Trash2 className="w-3.5 h-3.5" /> Delete Forever
+
+              {/* Permanent Delete */}
+              <button
+                onClick={() => handlePermanentDeleteUser(deleteModal.userId, deleteModal.email)}
+                className="w-full py-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/30 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Permanent Delete (Free Email — Irreversible)
+              </button>
+
+              {/* Cancel */}
+              <button onClick={() => setDeleteModal(null)} className="w-full py-2 rounded-xl bg-slate-900 border border-white/10 text-slate-400 text-[9px] font-mono hover:border-white/20 transition-all cursor-pointer">
+                Cancel
               </button>
             </div>
           </div>

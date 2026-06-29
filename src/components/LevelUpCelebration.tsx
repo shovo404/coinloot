@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Award, Sparkles, TrendingUp, Star, ChevronRight } from "lucide-react";
 import { getLevelTitle } from "../utils/levelSystem";
+import { playLevelUpSound } from "../utils/coinSound";
 
 interface LevelUpCelebrationProps {
   show: boolean;
@@ -22,6 +23,7 @@ export default function LevelUpCelebration({ show, level, onDismiss }: LevelUpCe
   useEffect(() => {
     if (!show) return;
     setVisible(true);
+    playLevelUpSound();
     const p = Array.from({ length: 40 }, (_, i) => ({
       id: i,
       x: Math.random() * 100,

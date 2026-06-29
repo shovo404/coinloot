@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Edit, Save, X, Check, Lock, Unlock, Coins, Copy, Gift, Calendar, Hash, ToggleLeft, ToggleRight, Upload, AlertCircle, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Edit, Save, X, Lock, Coins, Copy, Gift, Calendar, Hash, ToggleLeft, ToggleRight, Upload, AlertCircle, ExternalLink } from "lucide-react";
 import { getAllProviders } from "../utils/providerLogos";
 import {
   LockedOfferwallConfig, OfferwallPromoCode,
   getLockedOfferwallConfigs, setLockedOfferwallConfig, deleteLockedOfferwallConfig,
   getOfferwallPromoCodes, addOfferwallPromoCode, updateOfferwallPromoCode, deleteOfferwallPromoCode, getAllUserUnlocks,
+  isOfferwallLockEnabled, setOfferwallLockEnabled,
 } from "../utils/lockedOfferwallDB";
 
 interface Props {
@@ -130,7 +131,16 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
     refreshPromos();
   };
 
+  const [lockStatusTick, setLockStatusTick] = useState(0);
+
   const allUnlocks = getAllUserUnlocks();
+
+  const toggleLock = (providerName: string) => {
+    const next = !isOfferwallLockEnabled(providerName);
+    setOfferwallLockEnabled(providerName, next);
+    setLockStatusTick((t) => t + 1);
+    showNotif("success", `${providerName} lock ${next ? "Enabled" : "Disabled"}`);
+  };
   const finalConfigs = getLockedOfferwallConfigs();
 
   if (section === "locked-offers-management") {
@@ -285,6 +295,18 @@ export default function AdminLockedOfferwalls({ section, onBack, showNotif }: Pr
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
+                    {/* Per-offerwall lock toggle */}
+                    <label className="relative inline-flex items-center cursor-pointer" title={isOfferwallLockEnabled(p.name) ? "Lock enabled — users must meet requirements" : "Lock disabled — users can access immediately"}>
+                      <input
+                        type="checkbox"
+                        checked={isOfferwallLockEnabled(p.name)}
+                        onChange={() => toggleLock(p.name)}
+                        className="sr-only peer"
+                      />
+                      <div className={`relative w-9 h-5 rounded-full transition-all duration-200 ${isOfferwallLockEnabled(p.name) ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.25)]" : "bg-slate-700"}`}>
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-all duration-200 shadow-sm ${isOfferwallLockEnabled(p.name) ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                    </label>
                     {configured ? (
                       <button onClick={() => startEdit(cfg!)} className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer" title="Edit"><Edit className="w-3 h-3" /></button>
                     ) : (
