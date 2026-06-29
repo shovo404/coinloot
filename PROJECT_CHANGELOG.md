@@ -107,6 +107,37 @@ Sidebar parent ID `"vpn"` had no corresponding handler in `renderSection` inside
 - `src/components/AdminPanel.tsx` — Integrated VpnPage, removed dead code
 - `PROJECT_CHANGELOG.md` — This entry
 
+## 2026-06-30 — Fix New User Signup: Profile Never Created Due to Supabase v2 Response Format
+
+### Root Cause
+In `src/lib/supabaseService.ts`, the `signUp()` function stores the full Supabase `auth.signUp()` response into `authData`:
+
+```javascript
+const result = await sb.auth.signUp({...});
+authData = result;  // { data: { user, session }, error: null }
+if (authData.user) { ... }  // ❌ undefined! user is at data.user
+```
+
+In `@supabase/supabase-js` v2 (`^2.108.2`), `auth.signUp()` returns `{ data: { user, session }, error }` — the `user` object is nested under `data.user`, not at the top level. The code checked `authData.user` which was always `undefined`, so **the profile insert NEVER ran**.
+
+### Consequences
+1. Auth user created in Supabase ✅
+2. **Profile NEVER inserted** in `profiles` table ❌
+3. Auto sign-in after signup succeeds ✅
+4. `getProfile()` returns `null` (no profile exists) ❌
+5. User is left on the signup form with NO feedback — signup appears broken
+6. No error is shown because no error is thrown — execution silently falls through
+
+### Fixed
+- **`src/lib/supabaseService.ts`** (`signUp` function):
+  - Changed `if (authData.user)` → `const newUser = authData.data?.user || (authData as any).user; if (newUser)`
+  - Updated `authData.user.id` → `newUser.id` in profile insert
+  - Handles both Supabase v2 format (`data.user`) and v1 format (`user` at top level)
+  - Fix applies to both initial signup and re-registration retry paths
+
+### Files modified
+- `src/lib/supabaseService.ts` — Fixed user extraction from Supabase v2 auth response
+
 ## 2026-06-30 — VPN Test Connection: Fix "Unexpected status: denied" Error
 
 ### Root Cause

@@ -66,10 +66,13 @@ export async function signUp(email: string, password: string, username: string) 
     }
   }
 
-  if (authData.user) {
+  // In Supabase JS SDK v2, the response is { data: { user, session }, error }
+  // Support both v1 flattened ({ user }) and v2 ({ data: { user } }) formats
+  const newUser = authData.data?.user || (authData as any).user;
+  if (newUser) {
     // Create profile in profiles table (trigger handles referral link + notif settings)
     const { error: profileError } = await sb.from("profiles").insert({
-      id: authData.user.id,
+      id: newUser.id,
       username,
       email,
       balance_coins: 0,
