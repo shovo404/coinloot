@@ -194,6 +194,30 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
     return () => window.removeEventListener("promo-codes-changed", handler);
   }, []);
 
+  // Listen for lock-config-changed custom event
+  useEffect(() => {
+    const handler = async () => {
+      const [lockRules, offers, promoCodes] = await Promise.all([
+        getLockRules(),
+        getOffers(),
+        getPromoCodes(),
+      ]);
+      setState(prev => ({ ...prev, lockRules, offers, promoCodes }));
+    };
+    window.addEventListener("lock-config-changed", handler);
+    return () => window.removeEventListener("lock-config-changed", handler);
+  }, []);
+
+  // Listen for restriction-changed custom event — triggers vpnSettings refresh
+  useEffect(() => {
+    const handler = async () => {
+      const vpnSettings = await getVpnSettingsDb();
+      setState(prev => ({ ...prev, vpnSettings }));
+    };
+    window.addEventListener("restriction-changed", handler);
+    return () => window.removeEventListener("restriction-changed", handler);
+  }, []);
+
   // Periodic refresh as safety net
   useEffect(() => {
     const interval = setInterval(async () => {

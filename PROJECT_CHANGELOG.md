@@ -64,3 +64,64 @@
 - TypeScript compilation: **No new errors introduced**. All pre-existing errors (AdminPanel.tsx, SurveyHub.tsx, RewardPopup.tsx, seed-admin.ts) unchanged.
 - All modified files compile cleanly.
 - The sync functions remain backward compatible — existing callers in 6+ components continue to work without modification.
+
+## 2026-06-30 — Global Realtime Synchronization Audit & Fixes
+
+### Audit Summary
+Traced **39 admin-controlled features** end-to-end through: Admin Panel → Database → Supabase → Realtime Event → User Subscription → User Interface.
+
+### Working: 31 of 39 features (79%)
+Verified working via Supabase realtime subscriptions + custom event dispatches:
+- Ban/Unban, Add Coins, Soft/Permanent Delete, Restore, KYC Toggle → profiles Realtime
+- KYC Approve/Reject → profiles Realtime
+- Homepage Sections, Site Settings, Developer Mode → site_settings Realtime
+- Announcements CRUD → announcements Realtime + custom events
+- Promo Codes CRUD → site_settings Realtime + custom events
+- Global Promo/Banner → site_settings Realtime
+- System Notifications → system_notifications Realtime
+- Targeted User Notifications → notifications Realtime
+- Withdrawal Status → withdrawals Realtime + custom event
+- Social Bounty/Weekly Challenge → site_settings Realtime
+- Offers/Offer Status → site_settings Realtime
+- Passwords → profiles Realtime
+
+### Broken & Fixed: 8 features (21%)
+
+| # | Feature | Root Cause | Fix |
+|---|---|---|---|
+| 1 | Lock Toggle (AdminLockedOfferwalls) | `isOfferwallLockEnabled()` reads localStorage only | Added `lock-config-changed` custom event dispatch in `saveOfferwallLockStatusMap()` |
+| 2 | Lock Config Save | `saveLockedOfferwallConfig()` localStorage-only | Added `lock-config-changed` + Supabase persistence |
+| 3 | Promo/Unlock Codes | `saveOfferwallPromoCodes()`/`saveOfferwallUnlockCodes()` localStorage-only | Added custom event + Supabase persistence |
+| 4 | Restrict User | `restrictUser()` writes localStorage only | Added `restriction-changed` custom event + existing `supabaseSyncRestriction()` |
+| 5 | Unrestrict User | `unRestrictUser()` writes localStorage only | Added `restriction-changed` custom event |
+| 6 | Ban User | `banUser()` writes localStorage only | Added `restriction-changed` custom event |
+| 7 | Restriction Extension | `extendRestriction()` writes localStorage only | Added `restriction-changed` custom event |
+| 8 | User-side lock/restriction UI not updating | No re-render triggers | Added `lockChangeTick` state + event listeners in EarnPage, OfferwallHub, useAppRealtimeState |
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `src/utils/lockedOfferwallDB.ts` | Added `window.dispatchEvent(new CustomEvent("lock-config-changed"))` in 4 save functions; added Supabase persistence `persistLockSystemToSupabase()` |
+| `src/utils/vpnDetector.ts` | Added `window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId } }))` in 4 restriction functions |
+| `src/App.tsx` | Added restriction fields (`status`, `restriction_reason`, `restricted_at`, `restricted_by`, `restriction_notes`) to profile Realtime handler + dispatch `restriction-changed` on restriction field changes |
+| `src/hooks/useAppRealtimeState.tsx` | Added `lock-config-changed` listener (reloads lockRules/offers/promoCodes) + `restriction-changed` listener (reloads vpnSettings) |
+| `src/components/EarnPage.tsx` | Added `lockChangeTick` state + event listeners; added tick to 2 useMemo dependency arrays |
+| `src/components/OfferwallHub.tsx` | Added `lockChangeTick` state + event listeners; added tick to lockStatusMap useMemo dependency array |
+
+### Event Cascade (How it Works)
+
+**Lock config changes:**
+1. Admin toggles lock → `saveOfferwallLockStatusMap()` writes localStorage + dispatches `lock-config-changed` + persists to Supabase
+2. Same-tab: `lock-config-changed` listener in useAppRealtimeState reloads lockRules/offers → context updates → components re-render
+3. Cross-tab: Supabase `site_settings` Realtime subscription fires → full state reload → components re-render
+4. Components recompute `isOfferwallLockEnabled()` (reads updated localStorage / re-fetched context data)
+
+**Restriction changes:**
+1. Admin restricts user → `restrictUser()` writes localStorage + dispatches `restriction-changed` + writes to Supabase `profiles` table
+2. Same-tab: `restriction-changed` listener triggers re-render → `isUserRestricted()` reads updated localStorage
+3. Cross-tab: Supabase `profiles` Realtime subscription fires → App.tsx updates userProfile + dispatches `restriction-changed` → re-render
+
+### Testing Results
+- TypeScript compilation: **No new errors**. All errors pre-existing in AdminPanel.tsx, SurveyHub.tsx, RewardPopup.tsx, seed-admin.ts.
+- Code review: Confirmed correct — no memory leaks, no infinite loops, proper cleanup in all useEffect blocks.

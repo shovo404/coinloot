@@ -71,6 +71,8 @@ export function getOfferwallLockStatusMap(): Record<string, boolean> {
 
 function saveOfferwallLockStatusMap(map: Record<string, boolean>): void {
   localStorage.setItem(LOCK_STATUS_KEY, JSON.stringify(map));
+  window.dispatchEvent(new CustomEvent("lock-config-changed"));
+  persistLockSystemToSupabase();
 }
 
 export function setOfferwallLockEnabled(providerName: string, enabled: boolean): void {
@@ -95,6 +97,7 @@ export function getLockedOfferwallConfigs(): LockedOfferwallConfig[] {
 
 export function saveLockedOfferwallConfig(configs: LockedOfferwallConfig[]) {
   localStorage.setItem(CONFIG_KEY, JSON.stringify(configs));
+  window.dispatchEvent(new CustomEvent("lock-config-changed"));
   persistLockSystemToSupabase();
 }
 
@@ -124,6 +127,7 @@ export function getOfferwallPromoCodes(): OfferwallPromoCode[] {
 
 export function saveOfferwallPromoCodes(codes: OfferwallPromoCode[]) {
   localStorage.setItem(PROMO_KEY, JSON.stringify(codes));
+  window.dispatchEvent(new CustomEvent("lock-config-changed"));
   persistLockSystemToSupabase();
 }
 
@@ -248,6 +252,8 @@ export function getOfferwallUnlockCodes(): OfferwallUnlockCode[] {
 
 function saveOfferwallUnlockCodes(codes: OfferwallUnlockCode[]) {
   localStorage.setItem(UNLOCK_CODES_KEY, JSON.stringify(codes));
+  window.dispatchEvent(new CustomEvent("lock-config-changed"));
+  persistLockSystemToSupabase();
 }
 
 export function addOfferwallUnlockCode(code: OfferwallUnlockCode) {

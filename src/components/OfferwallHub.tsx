@@ -105,8 +105,21 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [viewingOffer, setViewingOffer] = useState<Offer | null>(null);
   const [submittingTestEarn, setSubmittingTestEarn] = useState(false);
+  const [lockChangeTick, setLockChangeTick] = useState(0);
   const restriction = isUserRestricted(user.id);
   const isRestricted = restriction.restricted;
+
+  // Force re-render when lock config or restriction changes
+  useEffect(() => {
+    const onLockChange = () => setLockChangeTick(t => t + 1);
+    const onRestrictionChange = () => setLockChangeTick(t => t + 1);
+    window.addEventListener("lock-config-changed", onLockChange);
+    window.addEventListener("restriction-changed", onRestrictionChange);
+    return () => {
+      window.removeEventListener("lock-config-changed", onLockChange);
+      window.removeEventListener("restriction-changed", onRestrictionChange);
+    };
+  }, []);
 
   // Re-sync offers when context or user balance changes
   useEffect(() => {
@@ -191,7 +204,7 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
     }
     
     return map;
-  }, [adminOffers, lockRules, user]);
+  }, [adminOffers, lockRules, user, lockChangeTick]);
 
   // Handle simulate completion of offer
   const completeOfferSimulator = (offer: Offer) => {

@@ -95,6 +95,20 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const allProviders = useMemo(() => getAllProviders(), []);
 
   const [lockedUnlockTick, setLockedUnlockTick] = useState(0);
+  const [lockChangeTick, setLockChangeTick] = useState(0);
+
+  // Force re-render when lock config or restriction changes
+  useEffect(() => {
+    const onLockChange = () => setLockChangeTick(t => t + 1);
+    const onRestrictionChange = () => setLockChangeTick(t => t + 1);
+    window.addEventListener("lock-config-changed", onLockChange);
+    window.addEventListener("restriction-changed", onRestrictionChange);
+    return () => {
+      window.removeEventListener("lock-config-changed", onLockChange);
+      window.removeEventListener("restriction-changed", onRestrictionChange);
+    };
+  }, []);
+
   const lockedConfigs = useMemo(() => {
     // Exclude providers already unlocked by code or coins
     // Also exclude providers already covered by adminOffers lock status
@@ -196,7 +210,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
       }
     });
     return map;
-  }, [adminOffers, lockRules, user]);
+  }, [adminOffers, lockRules, user, lockChangeTick]);
 
   const lockedProviderMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
@@ -250,7 +264,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
     }
 
     return map;
-  }, [adminOffers, lockRules, user]);
+  }, [adminOffers, lockRules, user, lockChangeTick]);
 
   const getProviderOfferCount = (providerName: string) => {
     return adminOffers.filter((o) => o.provider === providerName && o.status === "active").length;

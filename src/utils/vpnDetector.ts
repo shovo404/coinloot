@@ -365,6 +365,7 @@ export function restrictUser(
     updateUserProfileStatus(userId, "restricted");
     // Fire-and-forget Supabase sync
     supabaseSyncRestriction(userId, entry);
+    window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId } }));
   } catch { /* */ }
 }
 
@@ -387,6 +388,7 @@ export function banUser(
     saveRestrictionEntries(entries);
     updateUserProfileStatus(userId, "banned");
     supabaseSyncRestriction(userId, entry);
+    window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId } }));
   } catch { /* */ }
 }
 
@@ -396,6 +398,7 @@ export function unRestrictUser(userId: string) {
     saveRestrictionEntries(entries.filter((r) => r.userId !== userId));
     updateUserProfileStatus(userId, "active");
     supabaseSyncRestriction(userId, null);
+    window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId } }));
   } catch { /* */ }
 }
 
@@ -430,6 +433,7 @@ export function extendRestriction(userId: string, additionalMinutes: number) {
     entries[idx].restrictedUntil = new Date(base + additionalMinutes * 60000).toISOString();
     saveRestrictionEntries(entries);
     supabaseSyncRestriction(userId, entries[idx]);
+    window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId } }));
   } catch { /* */ }
 }
 

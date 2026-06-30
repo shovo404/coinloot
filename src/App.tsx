@@ -469,6 +469,7 @@ export default function App() {
       filter: `id=eq.${userProfile.id}`,
       callback: (payload) => {
         const updated = payload.new as any;
+        const old = payload.old as any;
         setUserProfile(prev => {
           if (!prev) return prev;
           return {
@@ -481,8 +482,21 @@ export default function App() {
             kyc_status: updated.kyc_status ?? prev.kyc_status,
             vpn_detected: updated.vpn_detected ?? prev.vpn_detected,
             is_banned: updated.is_banned ?? prev.is_banned,
+            status: updated.status ?? prev.status,
+            restriction_reason: updated.restriction_reason ?? prev.restriction_reason,
+            restricted_at: updated.restricted_at ?? prev.restricted_at,
+            restricted_by: updated.restricted_by ?? prev.restricted_by,
+            restriction_notes: updated.restriction_notes ?? prev.restriction_notes,
           };
         });
+        // If restriction-related fields changed, dispatch custom event so
+        // components re-check restriction state
+        const statusChanged = old?.status !== updated.status;
+        const reasonChanged = old?.restriction_reason !== updated.restriction_reason;
+        const bannedChanged = old?.is_banned !== updated.is_banned;
+        if (statusChanged || reasonChanged || bannedChanged) {
+          window.dispatchEvent(new CustomEvent("restriction-changed", { detail: { userId: updated.id } }));
+        }
       },
     });
 
