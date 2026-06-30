@@ -1190,6 +1190,27 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [rejectReason, setRejectReason] = useState("");
   const [rejectAndRestrict, setRejectAndRestrict] = useState(false);
   const [zoomImageKyc, setZoomImageKyc] = useState<string | null>(null);
+
+  // ── KYC Restriction Settings State ──
+  const [kycRestrictions, setKycRestrictions] = useState(() => {
+    try {
+      const saved = localStorage.getItem("coinloot_kyc_restrictions");
+      return saved ? JSON.parse(saved) : { blockWithdrawals: true, blockOfferwalls: true, blockRewards: true, blockReferrals: true };
+    } catch {
+      return { blockWithdrawals: true, blockOfferwalls: true, blockRewards: true, blockReferrals: true };
+    }
+  });
+  const saveKycRestrictions = (updates: any) => {
+    const updated = { ...kycRestrictions, ...updates };
+    setKycRestrictions(updated);
+    localStorage.setItem("coinloot_kyc_restrictions", JSON.stringify(updated));
+    // Sync to Supabase site_settings
+    const sb = getSupabaseClient();
+    if (sb) {
+      sb.from("site_settings").upsert({ setting_key: "kyc_restrictions", setting_value: JSON.stringify(updated) }, { onConflict: "setting_key" }).catch(() => {});
+    }
+    showNotif("success", "KYC restriction settings saved");
+  };
   const [serverRecords, setServerRecords] = useState<KycRecord[] | null>(null);
   const [loadingRecords, setLoadingRecords] = useState(false);
 
@@ -1208,6 +1229,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
   const [homepageSections, setHomepageSections] = useState<AdminDb.HomepageSections>({
     featured: true, hot: true, surveys: true, offerwalls: true,
     announcements: true, promo_cards: true, rewards: true, challenges: true,
+    social_bounty: true, weekly_challenge: true,
   });
 
   // Announcements
@@ -1790,6 +1812,15 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   // ── Special Unlock Codes state ──
   const [unlockCodes, setUnlockCodes] = useState<any[]>([]);
+  // ── Locked Offers Individual Management State ──
+  const [individualLockCodes, setIndividualLockCodes] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem("coinloot_locked_offers_codes") || "[]"); } catch { return []; }
+  });
+  const [editingLockCode, setEditingLockCode] = useState<any | null>(null);
+  const [showAddLockCode, setShowAddLockCode] = useState(false);
+  const [newLockCode, setNewLockCode] = useState({
+    code: "", description: "", status: "active" as const, expiresAt: "", usageLimit: 100, usageCount: 0, offerId: "",
+  });
   const [showAddUnlockCode, setShowAddUnlockCode] = useState(false);
   const [newUnlockCode, setNewUnlockCode] = useState({ code: "", description: "", status: "active" as const, expiresAt: "", usageLimit: 0, unlockOfferwallIds: [] as string[] });
   const [editUnlockCodeId, setEditUnlockCodeId] = useState<string | null>(null);
@@ -2146,6 +2177,7 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
 
   // ── KYC Required Toggle ──
   const handleToggleKycRequired = (userId: string, username: string, required: boolean) => {
+    // Update localStorage
     const stored = JSON.parse(localStorage.getItem("coinloot_user_profiles") || "[]");
     const idx = stored.findIndex((p: any) => p.id === userId);
     if (idx >= 0) {
@@ -2157,6 +2189,21 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
     if (acctIdx >= 0) {
       accounts[acctIdx].profile.kyc_required = required;
       localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
+    }
+    // Write to Supabase profiles table + send notification (key fix: was missing Supabase write!)
+    const sb = getSupabaseClient();
+    if (sb) {
+      sb.from("profiles").update({ kyc_required: required }).eq("id", userId)
+        .then(({ error }) => {
+          if (error) console.warn("[AdminPanel] Failed to update kyc_required in Supabase:", error.message);
+        });
+      sb.from("notifications").insert({
+        user_id: userId,
+        title: required ? "📋 KYC Verification Required" : "✅ KYC Requirement Removed",
+        message: required ? "Your account now requires KYC verification. Please complete it to continue using all features." : "The KYC requirement has been removed from your account.",
+        category: "system",
+        is_read: false,
+      }).catch(() => {});
     }
     setProfilesRefreshKey((k) => k + 1);
     addLog("KYC_REQUIRED_TOGGLE", "user", userId, `${required ? "Enabled" : "Disabled"} KYC mandatory for ${username}`);
@@ -2624,15 +2671,9 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                     <Send className="w-3 h-3" /> Save &amp; Notify
                   </button>
                   <button onClick={async () => {
-                    const notifId = `n-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-                    try {
-                      const allAccs = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-                      allAccs.forEach((a: any) => {
-                        const userNotifs: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
-                        userNotifs.unshift({ id: `${notifId}-${a.profile.id}`, user_id: a.profile.id, title: globalNotifText ? "📢 Announcement" : "🎉 Promo Event", description: globalNotifText || `Use code ${globalNotifPromoCode} to earn ${globalNotifPromoCoins} coins!`, time: new Date().toISOString(), category: "system", unread: true, coinsEarned: 0 });
-                        localStorage.setItem("coinloot_notifications", JSON.stringify(userNotifs));
-                      });
-                    } catch {}
+                    // Only save the global promo config — do NOT inject per-user notifications.
+                    // Announcements/promos display via the AnnouncementPromoSection in EarnPage.tsx
+                    // which reads from useAppRealtimeState().state.globalPromo.
                     localStorage.setItem("coinloot_global_notif_sent_at", String(Date.now()));
                     await AdminDb.saveGlobalPromoNotification({
                       text: globalNotifText,
@@ -2643,10 +2684,10 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
                       sentAt: String(Date.now()),
                       startAt: null,
                     }).catch(() => {});
-                    showNotif("success", "Broadcast sent to all users");
-                    addLog("GLOBAL_NOTIF_BROADCAST", "notification", "all", `Broadcast: ${globalNotifText || globalNotifPromoCode}`);
+                    showNotif("success", "Global notification saved. Users see it in the Announcement section on the Earn page.");
+                    addLog("GLOBAL_NOTIF_BROADCAST", "notification", "all", `Saved: ${globalNotifText || globalNotifPromoCode}`);
                   }} className="flex-1 py-2.5 rounded-xl bg-purple-500/10 text-purple-300 font-bold text-[10px] border border-purple-500/20 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                    <Megaphone className="w-3 h-3" /> Broadcast All
+                    <Megaphone className="w-3 h-3" /> Save &amp; Publish
                   </button>
                 </div>
               </div>
@@ -3461,6 +3502,261 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
       );
     }
 
+    // ═══ LOCK SYSTEM SECTIONS ═══
+    if (section === "locked-offers-management") {
+      return (
+        <div className="p-4 lg:p-6 space-y-4">
+          <AdminLockedOfferwalls section="locked-offers-management" onBack={goBack} showNotif={showNotif} />
+        </div>
+      );
+    }
+
+    if (section === "locked-offers-promos") {
+      return (
+        <div className="p-4 lg:p-6 space-y-4">
+          <AdminLockedOfferwalls section="locked-offers-promos" onBack={goBack} showNotif={showNotif} />
+        </div>
+      );
+    }
+
+    // ═══ LOCKED OFFERS (Individual) MANAGEMENT ═══
+    if (section === "locked-offers-individual") {
+      const saveIndividualLockCodes = (codes: any[]) => {
+        setIndividualLockCodes(codes);
+        localStorage.setItem("coinloot_locked_offers_codes", JSON.stringify(codes));
+      };
+
+      const lockedOffersList = offers.filter((o: any) => o.status === "locked" || o.status === "inactive");
+      const activeOffersList = offers.filter((o: any) => o.status === "active");
+
+      const handleToggleLock = (id: string, newStatus: string) => {
+        const updated = offers.map((x: any) => x.id === id ? { ...x, status: newStatus } : x);
+        setOffers(updated);
+        localStorage.setItem("coinloot_offers", JSON.stringify(updated));
+        AdminDb.saveOffers(updated).catch(() => {});
+        showNotif("success", `Offer ${newStatus === "locked" ? "Locked" : "Unlocked"}`);
+      };
+
+      const handleCreateLockCode = () => {
+        if (!newLockCode.code.trim() || !newLockCode.offerId) {
+          showNotif("error", "Code and offer selection required");
+          return;
+        }
+        const updated = [...individualLockCodes, {
+          ...newLockCode,
+          id: `ilc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          createdAt: new Date().toISOString(),
+        }];
+        saveIndividualLockCodes(updated);
+        setNewLockCode({ code: "", description: "", status: "active", expiresAt: "", usageLimit: 100, usageCount: 0, offerId: "" });
+        setShowAddLockCode(false);
+        showNotif("success", "Unlock code created");
+      };
+
+      const handleDeleteLockCode = (id: string) => {
+        saveIndividualLockCodes(individualLockCodes.filter((c: any) => c.id !== id));
+        showNotif("success", "Unlock code deleted");
+      };
+
+      return (
+        <div className="p-4 lg:p-6 space-y-6">
+          <AdminBackBtn onClick={goBack} />
+          <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
+            <Lock className="w-5 h-5 text-amber-400" /> Locked Offers Management
+          </h1>
+
+          {/* Locked / Inactive Offers List */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-400" /> Locked / Inactive Offers
+                <span className="text-[9px] text-slate-500 font-mono ml-1">({lockedOffersList.length})</span>
+              </h2>
+            </div>
+            {lockedOffersList.length === 0 ? (
+              <div className="p-8 text-center">
+                <Lock className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-500">No locked offers. Lock offers from the Offer Management section.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {lockedOffersList.map((o: any) => (
+                  <div key={o.id} className="p-4 flex items-center justify-between hover:bg-white/[0.02] transition-all">
+                    <div className="min-w-0 flex-1">
+                      <span className="block text-xs font-bold text-white truncate">{o.title}</span>
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        {o.provider} &middot; {o.payout.toLocaleString()} coins &middot; {o.difficulty}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`text-[8px] px-2 py-0.5 rounded-full font-bold ${o.status === "locked" ? "bg-amber-500/10 text-amber-400" : "bg-slate-700/50 text-slate-400"}`}>
+                        {o.status.toUpperCase()}
+                      </span>
+                      <button
+                        onClick={() => handleToggleLock(o.id, o.status === "locked" ? "active" : "locked")}
+                        className="px-2.5 py-1.5 rounded-lg text-[8px] font-bold transition-all cursor-pointer flex items-center gap-1"
+                        style={{
+                          background: o.status === "locked" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
+                          border: o.status === "locked" ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(239,68,68,0.2)",
+                          color: o.status === "locked" ? "rgb(52,211,153)" : "rgb(251,113,133)",
+                        }}
+                      >
+                        {o.status === "locked" ? <Unlock className="w-2.5 h-2.5" /> : <Lock className="w-2.5 h-2.5" />}
+                        {o.status === "locked" ? "Unlock" : "Lock"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Active Offers List for lock assignment */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white">
+                Active Offers
+                <span className="text-[9px] text-slate-500 font-mono ml-1">({activeOffersList.length})</span>
+              </h2>
+            </div>
+            <div className="divide-y divide-white/5 max-h-48 overflow-y-auto">
+              {activeOffersList.map((o: any) => (
+                <div key={o.id} className="p-3 flex items-center justify-between hover:bg-white/[0.02]">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-semibold text-white truncate block">{o.title}</span>
+                    <span className="text-[8px] text-slate-400 font-mono">{o.provider} &middot; {o.payout.toLocaleString()} coins</span>
+                  </div>
+                  <button
+                    onClick={() => handleToggleLock(o.id, "locked")}
+                    className="px-2 py-1 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[8px] font-bold hover:bg-rose-500/20 transition-all cursor-pointer flex items-center gap-1"
+                  >
+                    <Lock className="w-2.5 h-2.5" /> Lock
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Unlock Codes Management */}
+          <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Key className="w-4 h-4 text-cyan-400" /> Unlock Codes for Offers
+                <span className="text-[9px] text-slate-500 font-mono ml-1">({individualLockCodes.length})</span>
+              </h2>
+              <button onClick={() => { setShowAddLockCode(!showAddLockCode); setEditingLockCode(null); }} className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 text-cyan-300 text-[9px] font-bold border border-cyan-500/20 hover:from-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer">
+                <Plus className="w-3 h-3" /> {showAddLockCode ? "Cancel" : "Create Code"}
+              </button>
+            </div>
+
+            {showAddLockCode && (
+              <div className="p-5 border-b border-white/5 bg-slate-950/40 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Unlock Code</label>
+                    <input
+                      value={newLockCode.code}
+                      onChange={(e) => setNewLockCode({ ...newLockCode, code: e.target.value.toUpperCase() })}
+                      placeholder="e.g. OFFER100"
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white uppercase placeholder-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Assign to Offer</label>
+                    <select
+                      value={newLockCode.offerId}
+                      onChange={(e) => setNewLockCode({ ...newLockCode, offerId: e.target.value })}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                    >
+                      <option value="">Select an offer...</option>
+                      {offers.map((o: any) => (
+                        <option key={o.id} value={o.id}>
+                          {o.title} ({o.provider}) - {o.status}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Description</label>
+                    <input
+                      value={newLockCode.description}
+                      onChange={(e) => setNewLockCode({ ...newLockCode, description: e.target.value })}
+                      placeholder="Optional description"
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Usage Limit</label>
+                    <input
+                      type="number"
+                      value={newLockCode.usageLimit}
+                      onChange={(e) => setNewLockCode({ ...newLockCode, usageLimit: parseInt(e.target.value) || 1 })}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-500 uppercase font-mono block mb-1">Expiry Date</label>
+                    <input
+                      type="date"
+                      value={newLockCode.expiresAt}
+                      onChange={(e) => setNewLockCode({ ...newLockCode, expiresAt: e.target.value })}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <button onClick={handleCreateLockCode} className="w-full py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-[10px] font-bold hover:scale-[1.02] transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                      <Plus className="w-3.5 h-3.5" /> Create Unlock Code
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {individualLockCodes.length === 0 ? (
+              <div className="p-8 text-center">
+                <Key className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-500">No unlock codes created yet</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {individualLockCodes.map((c: any) => {
+                  const linkedOffer = offers.find((o: any) => o.id === c.offerId);
+                  const expired = c.expiresAt ? new Date(c.expiresAt) < new Date() : false;
+                  return (
+                    <div key={c.id} className="p-4 flex items-center justify-between hover:bg-white/[0.02]">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`px-2 py-0.5 rounded-lg font-bold text-[9px] font-mono tracking-wider ${c.status === "active" && !expired ? "bg-purple-500/15 text-purple-300 border border-purple-500/25" : "bg-rose-500/15 text-rose-300 border border-rose-500/25"}`}>
+                            {c.code}
+                          </span>
+                          <span className={`text-[8px] font-mono ${c.status === "active" && !expired ? "text-emerald-400" : "text-rose-400"}`}>
+                            {c.status === "active" && !expired ? "Active" : "Expired"}
+                          </span>
+                        </div>
+                        <span className="block text-[9px] text-slate-400 font-mono">
+                          Offer: {linkedOffer?.title || "Unknown"} ({linkedOffer?.provider || c.offerId})
+                          {c.description && ` - ${c.description}`}
+                        </span>
+                        <span className="text-[8px] text-slate-500 font-mono">
+                          Uses: {c.usageCount || 0} / {c.usageLimit}
+                          {c.expiresAt && ` - Exp: ${new Date(c.expiresAt).toLocaleDateString()}`}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                        <button onClick={() => handleDeleteLockCode(c.id)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     // ═══ COINS & REWARDS ═══
     if (section === "coins") {
       const handleBonusAll = () => {
@@ -4155,6 +4451,33 @@ export default function AdminPanel({ user, onRewardEarned, activeSection: extern
             ))}
           </div>
 
+          {/* ── KYC Restriction Settings ── */}
+          <div className="bg-slate-950/40 p-5 rounded-3xl border border-white/5">
+            <h3 className="font-bold text-sm text-white mb-3 flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-amber-400" /> KYC Restriction Options</h3>
+            <p className="text-[10px] text-slate-400 font-mono mb-4">Choose which features are blocked for users with KYC Required = Yes until they complete verification.</p>
+            <div className="space-y-3">
+              {[
+                { key: "blockWithdrawals", label: "Block Withdrawals", desc: "Prevent withdrawals until KYC is completed" },
+                { key: "blockOfferwalls", label: "Block Offerwalls", desc: "Hide offerwalls until KYC is completed" },
+                { key: "blockRewards", label: "Block Rewards", desc: "Block reward store access until KYC is completed" },
+                { key: "blockReferrals", label: "Block Referrals", desc: "Block referral/affiliate page until KYC is completed" },
+              ].map((opt) => (
+                <div key={opt.key} className="flex items-center justify-between bg-slate-900/40 p-3 rounded-2xl border border-white/5">
+                  <div>
+                    <span className="block text-xs font-semibold text-white">{opt.label}</span>
+                    <span className="block text-[9px] text-slate-500 mt-0.5">{opt.desc}</span>
+                  </div>
+                  <button
+                    onClick={() => saveKycRestrictions({ [opt.key]: !kycRestrictions[opt.key] })}
+                    className={`relative w-10 h-5 rounded-full transition-all shrink-0 cursor-pointer ${kycRestrictions[opt.key] ? "bg-emerald-500" : "bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${kycRestrictions[opt.key] ? "left-[calc(100%-18px)]" : "left-0.5"}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* All KYC Records Table */}
           <div className="bg-slate-950/40 rounded-3xl border border-white/5 overflow-hidden">
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
@@ -4684,7 +5007,7 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
     // ═══ HOMEPAGE — Earn Page Sections ═══
     if (section === "homepage") {
       const toggleSection = async (key: string) => {
-        const defaults: AdminDb.HomepageSections = { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true };
+        const defaults: AdminDb.HomepageSections = { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true, social_bounty: true, weekly_challenge: true };
         const updated = { ...defaults, ...homepageSections, [key]: !homepageSections[key] };
         // Optimistic local update
         setHomepageSections(updated);
@@ -4704,6 +5027,8 @@ const toggleVpnSetting = (key: keyof typeof vpnSettings) => {
         { key: "hot", label: "Hot Offers", icon: Flame, desc: "Show the Hot Offers carousel on the earn page" },
         { key: "surveys", label: "Surveys", icon: ClipboardCheck, desc: "Show the Surveys section on the earn page" },
         { key: "offerwalls", label: "Offerwall Providers", icon: ShieldCheck, desc: "Show the Offerwall Providers grid on the earn page" },
+        { key: "social_bounty", label: "Social Bounty Campaigns", icon: Award, desc: "Show the Social Bounty Campaigns section on the earn page" },
+        { key: "weekly_challenge", label: "Weekly Elite Challenge", icon: Trophy, desc: "Show the Weekly Elite Challenge chest in the Rewards store" },
       ];
       return (
         <div className="p-4 lg:p-6 space-y-4 max-w-3xl">

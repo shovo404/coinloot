@@ -11,7 +11,7 @@ import { isDeveloperMode } from "./DeveloperModeBanner";
 import { getProviderInfo, getProviderLogoUrl, getProviderDomain, getAllProviders } from "../utils/providerLogos";
 import { useAppRealtimeState } from "../hooks/useAppRealtimeState";
 import { calcLevel } from "../utils/levelSystem";
-import { isOfferwallUnlockedByCode, isOfferwallLockEnabled } from "../utils/lockedOfferwallDB";
+import { isOfferwallUnlockedByCode, isOfferwallLockEnabled, getLockedOfferwallConfigs } from "../utils/lockedOfferwallDB";
 
 interface OfferwallHubProps {
   user: UserProfile;
@@ -151,6 +151,8 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
   // Compute lock status for each offer
   const lockStatusMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
+    const lockedConfigs = getLockedOfferwallConfigs();
+    
     if (adminOffers.length > 0) {
       adminOffers.forEach((ao: any) => {
         // Check per-offerwall lock enabled status
@@ -171,6 +173,23 @@ export default function OfferwallHub({ user, setUser, onRewardEarned, simulation
         }
       });
     }
+    
+    // Also check lock configs for fallback offers (no admin offers configured)
+    if (adminOffers.length === 0) {
+      FALLBACK_OFFERS.forEach((offer) => {
+        const cfg = lockedConfigs.find((c) => c.providerName === offer.provider);
+        if (!isOfferwallLockEnabled(offer.provider)) {
+          map.set(offer.id, { locked: false, reason: "" });
+        } else if (isOfferwallUnlockedByCode(user.id, offer.provider)) {
+          map.set(offer.id, { locked: false, reason: "" });
+        } else if (cfg && cfg.isLocked && user.total_earned_coins < cfg.requiredCoins) {
+          map.set(offer.id, { locked: true, reason: cfg.requiredCoins 
+            ? `Earn ${cfg.requiredCoins.toLocaleString()} total coins to unlock`
+            : "Locked by admin" });
+        }
+      });
+    }
+    
     return map;
   }, [adminOffers, lockRules, user]);
 

@@ -315,6 +315,7 @@ export async function updateProfile(
   if (updates.kyc_status !== undefined) dbUpdates.kyc_status = updates.kyc_status;
   if (updates.xp !== undefined) dbUpdates.xp = updates.xp;
   if (updates.level !== undefined) dbUpdates.level = updates.level;
+  if (updates.kyc_required !== undefined) dbUpdates.kyc_required = updates.kyc_required;
   if (updates.vpn_detected !== undefined) dbUpdates.vpn_detected = updates.vpn_detected;
   if (updates.preference_theme !== undefined) dbUpdates.preference_theme = updates.preference_theme;
   if (updates.preference_language !== undefined) dbUpdates.preference_language = updates.preference_language;
@@ -1018,6 +1019,41 @@ export async function getWithdrawalMethods(): Promise<any[]> {
     { id: "binance", name: "Binance Pay", icon: "🌐", minCoins: 1000, type: "binance", fieldLabel: "Binance UID / Email", placeholder: "Enter your Binance UID or email", description: "Withdraw via Binance Pay. Min: 1,000 coins.", status: "ACTIVE" },
     { id: "usdt", name: "USDT (TRC-20)", icon: "₮", minCoins: 2000, type: "usdt", fieldLabel: "USDT Wallet Address", placeholder: "Enter your TRC-20 wallet address", description: "Withdraw via USDT (TRC-20). Min: 2,000 coins.", status: "ACTIVE" },
   ];
+}
+
+// ─── Leaderboard ────────────────────────────────────────────────────────────
+
+export async function getLeaderboard(limit: number = 50): Promise<UserProfile[]> {
+  const sb = getSupabaseClient();
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from("profiles")
+        .select("*")
+        .order("total_earned_coins", { ascending: false })
+        .limit(limit);
+
+      if (!error && data && data.length > 0) {
+        return data.map(mapDbProfileToUserProfile);
+      }
+    } catch {}
+  }
+
+  // Fallback to localStorage accounts sorted by total_earned_coins
+  try {
+    const stored = localStorage.getItem("coinloot_accounts");
+    if (stored) {
+      const accounts = JSON.parse(stored);
+      if (Array.isArray(accounts)) {
+        return accounts
+          .map((a: any) => a.profile as UserProfile)
+          .sort((a: any, b: any) => (b.total_earned_coins || 0) - (a.total_earned_coins || 0))
+          .slice(0, limit);
+      }
+    }
+  } catch {}
+
+  return [];
 }
 
 // ─── Social Bounty Campaigns (user-facing) ─────────────────────────────────

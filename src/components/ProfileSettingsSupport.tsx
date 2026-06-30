@@ -361,16 +361,12 @@ export default function ProfileSettingsSupport({
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="font-sans font-semibold text-slate-200 block">Simulate Admin credentials status</span>
-                      <span className="text-[10px] text-slate-500 block">Gives administrator routing panel access</span>
+                      <span className="font-sans font-semibold text-slate-200 block">Admin Privileges</span>
+                      <span className="text-[10px] text-slate-500 block">Admin status is managed via Supabase database and cannot be self-assigned</span>
                     </div>
-
-                    <button
-                      onClick={() => setUser({ ...user, is_admin: !user.is_admin, role: !user.is_admin ? 'admin' : 'user' })}
-                      className={`w-14 h-8 rounded-full p-1 transition-all ${user.is_admin ? "bg-purple-600 text-white flex justify-end" : "bg-slate-800 text-slate-500 flex justify-start"}`}
-                    >
-                      <span className="w-6 h-6 rounded-full bg-white block" />
-                    </button>
+                    <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold ${user.is_admin ? "bg-purple-500/10 text-purple-400 border border-purple-500/20" : "bg-slate-700/50 text-slate-400 border border-white/5"}`}>
+                      {user.is_admin ? "ADMIN" : "USER"}
+                    </span>
                   </div>
                 </div>
               </div>

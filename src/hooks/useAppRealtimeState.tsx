@@ -33,7 +33,7 @@ export interface AppRealtimeState {
 }
 
 const defaultState: AppRealtimeState = {
-  homepageSections: { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true },
+  homepageSections: { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true, social_bounty: true, weekly_challenge: true },
   developerMode: { enabled: false, message: "" },
   maintenanceMode: { enabled: false, message: "" },
   globalPromo: { text: "", promoEnabled: false, promoCode: "", promoCoins: 0, promoDuration: 0, sentAt: null, startAt: null },

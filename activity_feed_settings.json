@@ -1,7 +1,7 @@
 {
-  "showEarnings": true,
-  "showWithdrawals": true,
+  "showEarnings": false,
+  "showWithdrawals": false,
   "showBonuses": false,
-  "showReferrals": true,
+  "showReferrals": false,
   "speed": "fast"
 }

@@ -262,7 +262,7 @@ export default function RewardsStore({ user, setUser, onRewardEarned }: RewardsS
         </div>
 
         {/* Weekly Elite chest */}
-        {challengeConfig.enabled && challengeConfig.active && (
+        {state.homepageSections.weekly_challenge && challengeConfig.enabled && challengeConfig.active && (
         <div className="glass rounded-3xl p-6 flex flex-col justify-between space-y-6">
           <div className="space-y-2">
             <div className="flex items-center justify-between">

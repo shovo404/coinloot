@@ -50,6 +50,14 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
       { id: "vpn-control", label: "Control Center" },
     ],
   },
+  {
+    id: "lock-system", label: "Lock System", icon: Lock,
+    children: [
+      { id: "locked-offers-management", label: "Locked Offerwalls", badge: "Config" },
+      { id: "locked-offers-promos", label: "Promo Codes", badge: "Codes" },
+      { id: "locked-offers-individual", label: "Locked Offers" },
+    ],
+  },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 

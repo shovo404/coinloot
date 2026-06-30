@@ -513,14 +513,19 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const prevNotifIdsRef = useRef<Set<string>>(new Set());
 
-  // One-time cleanup of stale broadcast notifications (from old tests/demo data)
+  // One-time cleanup: Remove ALL stale broadcast/announcement notifications from localStorage.
+  // Announcements display ONLY in the EarnPage AnnouncementPromoSection — never in the
+  // notification dropdown. This cleans up any previously-broadcast notification records.
   useEffect(() => {
     try {
       const stored: any[] = JSON.parse(localStorage.getItem("coinloot_notifications") || "[]");
       if (Array.isArray(stored)) {
         const cleaned = stored.filter((n: any) => {
-          const isStaleBroadcast = (n.title === "📢 Announcement" || n.title === "🎉 Promo Event") && n.description?.trim()?.length < 20;
-          return !isStaleBroadcast;
+          // Remove any notification with announcement/promo titles — these should never
+          // appear in the notification dropdown. Announcements live on the Earn page only.
+          const title = (n.title || "").trim();
+          const isAnnouncementNotif = title === "📢 Announcement" || title === "🎉 Promo Event";
+          return !isAnnouncementNotif;
         });
         if (cleaned.length < stored.length) {
           localStorage.setItem("coinloot_notifications", JSON.stringify(cleaned));

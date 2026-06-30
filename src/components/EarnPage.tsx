@@ -96,10 +96,16 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   const [lockedUnlockTick, setLockedUnlockTick] = useState(0);
   const lockedConfigs = useMemo(() => {
+    // Exclude providers already unlocked by code or coins
+    // Also exclude providers already covered by adminOffers lock status
+    const adminLockedProviders = new Set(adminOffers.filter(o => o.status === 'locked' || o.status === 'inactive').map(o => o.provider));
     return getLockedOfferwallConfigs().filter(
-      (c) => c.isLocked && isOfferwallLockEnabled(c.providerName) && !isOfferwallUnlocked(user.id, c.providerName) && !isOfferwallUnlockedByCode(user.id, c.providerName)
+      (c) => c.isLocked && isOfferwallLockEnabled(c.providerName) 
+        && !isOfferwallUnlocked(user.id, c.providerName) 
+        && !isOfferwallUnlockedByCode(user.id, c.providerName)
+        && !adminLockedProviders.has(c.providerName)
     );
-  }, [user.id, user.total_earned_coins, lockedUnlockTick]);
+  }, [user.id, user.total_earned_coins, lockedUnlockTick, adminOffers]);
 
   const [socialCampaigns, setSocialCampaigns] = useState<any[]>([]);
   const [campaignSubmissions, setCampaignSubmissions] = useState<Record<string, any[]>>({});
@@ -110,6 +116,32 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
   const [unlockCodeInputs, setUnlockCodeInputs] = useState<Record<string, string>>({});
   const [unlockCodeErrors, setUnlockCodeErrors] = useState<Record<string, string>>({});
   const [unlockCodeLoading, setUnlockCodeLoading] = useState<Record<string, boolean>>({});
+
+  // ── Locked Offers per-offer success state ──
+  const [lockedOfferUnlocked, setLockedOfferUnlocked] = useState<Record<string, boolean>>({});
+
+  // ── Locked Offers (individual locked admin offers) ──
+  const lockedOffers = useMemo(() => {
+    return adminOffers
+      .filter((ao) => (ao.status === "locked" || ao.status === "inactive")
+        && !isOfferwallUnlockedByCode(user.id, ao.provider))
+      .map((ao) => {
+        const providerInfo = getProviderInfo(ao.provider);
+        const img = (ao as any).imageUrl || getProviderLogoUrl(ao.provider);
+        const lockReason = ao.status === "locked"
+          ? evaluateLockRules(user, lockRules).reason || "Locked by admin"
+          : "Offer is currently inactive";
+        const offerId = `locked-offer-${ao.id}`;
+        return {
+          ...ao,
+          _offerId: offerId,
+          _imageUrl: img,
+          _providerInfo: providerInfo,
+          _lockReason: lockReason,
+          _isInactive: ao.status === "inactive",
+        };
+      });
+  }, [adminOffers, lockRules, user, lockedUnlockTick]);
 
   const featuredScrollRef = useRef<HTMLDivElement>(null);
   const hotScrollRef = useRef<HTMLDivElement>(null);
@@ -168,6 +200,9 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   const lockedProviderMap = useMemo(() => {
     const map = new Map<string, { locked: boolean; reason: string }>();
+    const lockedConfigs = getLockedOfferwallConfigs();
+
+    // First, check admin offers for lock status
     adminOffers.forEach((ao) => {
       if (!isOfferwallLockEnabled(ao.provider)) {
         map.set(ao.provider, { locked: false, reason: "" });
@@ -186,6 +221,34 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
         }
       }
     });
+
+    // Second, check lock configs for providers not yet in the map
+    // This catches providers locked via Locked Offerwall Management even without admin offers
+    for (const name of OFFERWALL_PROVIDERS) {
+      if (!map.has(name)) {
+        if (!isOfferwallLockEnabled(name)) {
+          map.set(name, { locked: false, reason: "" });
+          continue;
+        }
+        // Check if user unlocked via special unlock code
+        if (isOfferwallUnlockedByCode(user.id, name)) {
+          map.set(name, { locked: false, reason: "" });
+          continue;
+        }
+        const cfg = lockedConfigs.find((c) => c.providerName === name);
+        if (cfg && cfg.isLocked) {
+          const earned = user.total_earned_coins;
+          if (earned < cfg.requiredCoins) {
+            map.set(name, { locked: true, reason: `Earn ${cfg.requiredCoins.toLocaleString()} total coins to unlock` });
+          }
+        } else if (!cfg) {
+          // Lock is enabled but no config exists — show as locked with generic message
+          // User must use an unlock code to access
+          map.set(name, { locked: true, reason: "Locked by admin — use an unlock code" });
+        }
+      }
+    }
+
     return map;
   }, [adminOffers, lockRules, user]);
 
@@ -481,8 +544,198 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
         </div>
       )}
 
+      {/* ═══════════════════ LOCKED OFFERS (Individual) ═══════════════════ */}
+      {visibleSections.offerwalls && lockedOffers.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500/20 to-rose-600/20 border border-amber-500/25 flex items-center justify-center">
+                <Lock className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-lg lg:text-xl font-bold text-white tracking-tight">
+                  Locked Offers
+                </h2>
+                <p className="text-[10px] text-slate-500 font-mono">Locked by admin — use an unlock code</p>
+              </div>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/15 to-rose-600/10 border border-amber-500/25 text-[8px] font-extrabold text-amber-400 font-mono tracking-wider flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              {lockedOffers.length} LOCKED
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {lockedOffers.map((lo) => {
+              const offerId = lo._offerId;
+              const provider = lo._providerInfo;
+              const color = provider?.color || "from-purple-500 to-pink-600";
+              return (
+                <div
+                  key={lo.id}
+                  className="relative flex flex-col rounded-3xl overflow-hidden transition-all duration-500 w-full border hover:scale-[1.015]"
+                  style={{
+                    borderColor: "rgba(124,58,237,0.25)",
+                    background: "linear-gradient(160deg, #0B0E1A 0%, #111827 40%, #18192D 100%)",
+                    boxShadow: "0 0 40px rgba(124,58,237,0.08), inset 0 1px 0 rgba(255,255,255,0.03)",
+                  }}
+                >
+                  {/* Background effects */}
+                  <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+                    {lo._imageUrl && (
+                      <img src={lo._imageUrl} alt="" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[160px] h-[160px] object-contain opacity-[0.04] scale-110" />
+                    )}
+                    <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[250px] h-[250px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)" }} />
+                    <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-purple-500/5 blur-[60px]" />
+                    <div className="absolute -bottom-20 -left-20 w-40 h-40 rounded-full bg-pink-500/5 blur-[60px]" />
+                    <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+                  </div>
+
+                  {/* LOCKED Badge */}
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full backdrop-blur-md"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(239,68,68,0.25), rgba(220,38,38,0.15))",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                    }}
+                  >
+                    <Lock className="w-2.5 h-2.5 text-white" />
+                    <span className="text-[7px] font-extrabold tracking-[0.15em] uppercase text-white">{lo._isInactive ? "Inactive" : "Locked"}</span>
+                  </div>
+
+                  {/* Content */}
+                  <div className="relative z-10 flex flex-col p-4 pt-10 gap-2.5 flex-1">
+                    {/* Provider + Reward */}
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-12 h-12 rounded-2xl backdrop-blur-xl flex items-center justify-center p-2 overflow-hidden shrink-0"
+                        style={{
+                          background: "linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        {lo._imageUrl ? (
+                          <img src={lo._imageUrl} alt={lo.provider} className="w-full h-full object-contain opacity-60" />
+                        ) : (
+                          <div className={`w-full h-full rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
+                            <span className="text-lg font-bold text-white">{provider?.initials || lo.provider[0]}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[8px] font-bold text-purple-300 font-mono tracking-wider uppercase">{lo.provider}</span>
+                        <h3 className="text-sm font-extrabold text-white leading-tight">{lo.title}</h3>
+                      </div>
+                    </div>
+
+                    {/* Reward */}
+                    <div
+                      className="rounded-2xl backdrop-blur-md px-3.5 py-2.5 flex items-center gap-2.5"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                      }}
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400/20 to-yellow-600/10 border border-amber-400/20 flex items-center justify-center">
+                        <Lock className="w-4 h-4 text-amber-300" />
+                      </div>
+                      <div>
+                        <p className="text-[7px] text-gray-500 font-medium tracking-wide uppercase">Reward</p>
+                        <p className="text-sm font-extrabold tracking-tight text-amber-300">{lo.payout.toLocaleString()} Coins</p>
+                      </div>
+                      <span className="ml-auto text-[8px] text-slate-500 font-mono">{lo.difficulty}</span>
+                    </div>
+
+                    {/* Unlock Requirement */}
+                    <div className="px-3.5 py-2 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-start gap-2">
+                      <Info className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-[9px] text-amber-300 font-mono leading-snug">
+                        {lo._lockReason}
+                      </p>
+                    </div>
+
+                    {/* ── Unlock Code Input ── */}
+                    {lockedOfferUnlocked[offerId] ? (
+                      <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2.5 flex items-center gap-2 mt-auto">
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-[9px] text-emerald-300 font-bold">Offer Unlocked Successfully</span>
+                      </div>
+                    ) : (
+                      <div className="mt-auto">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <div className="flex-1 h-px bg-white/5" />
+                          <span className="text-[7px] text-slate-600 font-mono tracking-wider">UNLOCK CODE</span>
+                          <div className="flex-1 h-px bg-white/5" />
+                        </div>
+                        <div className="flex gap-1.5">
+                          <div className="relative flex-1">
+                            <Key className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                            <input
+                              value={unlockCodeInputs[offerId] || ""}
+                              onChange={(e) => {
+                                setUnlockCodeInputs({ ...unlockCodeInputs, [offerId]: e.target.value.toUpperCase() });
+                                setUnlockCodeErrors({ ...unlockCodeErrors, [offerId]: "" });
+                              }}
+                              placeholder="ENTER CODE"
+                              className="w-full bg-slate-950/80 border border-white/10 rounded-xl pl-8 pr-2.5 py-2 text-[9px] font-mono font-bold text-white placeholder-slate-700 uppercase tracking-widest focus:outline-none focus:border-purple-500/40 focus:ring-1 focus:ring-purple-500/20 transition-all"
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              const input = (unlockCodeInputs[offerId] || "").trim();
+                              if (!input) { setUnlockCodeErrors({ ...unlockCodeErrors, [offerId]: "Enter a code" }); return; }
+                              setUnlockCodeLoading({ ...unlockCodeLoading, [offerId]: true });
+                              setTimeout(() => {
+                                const result = validateOfferwallUnlockCode(input, lo.provider);
+                                if (!result.valid) {
+                                  setUnlockCodeErrors({ ...unlockCodeErrors, [offerId]: result.error || "Invalid code" });
+                                  setUnlockCodeLoading({ ...unlockCodeLoading, [offerId]: false });
+                                  return;
+                                }
+                                incrementUnlockCodeUsage(result.record!.id);
+                                addUserUnlockedOfferwall({
+                                  id: `uo-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+                                  userId: user.id,
+                                  offerwallId: lo.provider,
+                                  unlockCodeId: result.record!.id,
+                                  unlockedAt: new Date().toISOString(),
+                                });
+                                setUnlockCodeLoading({ ...unlockCodeLoading, [offerId]: false });
+                                setLockedOfferUnlocked({ ...lockedOfferUnlocked, [offerId]: true });
+                                setTimeout(() => setLockedUnlockTick((t) => t + 1), 1200);
+                              }, 500);
+                            }}
+                            disabled={unlockCodeLoading[offerId]}
+                            className="px-3 py-2 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-300 font-bold text-[9px] border border-purple-500/20 hover:from-purple-600/30 hover:border-purple-500/40 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {unlockCodeLoading[offerId] ? (
+                              <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                            ) : "Unlock"}
+                          </button>
+                        </div>
+                        {unlockCodeErrors[offerId] && (
+                          <div className="flex items-center gap-1 mt-1.5">
+                            <AlertCircle className="w-2.5 h-2.5 text-rose-400 shrink-0" />
+                            <span className="text-[8px] text-rose-300 font-mono">{unlockCodeErrors[offerId]}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pagination dots */}
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(250,204,21,0.5)]" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-gray-600/50" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ═══════════════════ LOCKED OFFERWALLS ═══════════════════ */}
-      {visibleSections.offerwalls && adminOffers.filter((o) => o.status === "locked" || o.status === "inactive").length > 0 && (
+      {visibleSections.offerwalls && OFFERWALL_PROVIDERS.some((name) => isProviderLocked(name)) && (
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg lg:text-xl font-bold text-white flex items-center gap-2">

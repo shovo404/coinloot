@@ -1,3 +1,5 @@
+import { getSupabaseClient } from "../lib/supabase";
+
 export type NotificationPriority = "critical" | "high" | "medium" | "low";
 
 export type NotificationCategory =
@@ -203,6 +205,48 @@ export function isNotificationTypeEnabled(type: NotificationType): boolean {
   return pref ? pref.enabled : true;
 }
 
+// ── Supabase persistence (production source of truth) ──
+
+const ADMIN_NOTIF_SETTINGS_KEY = "admin_notifications";
+
+/** Write admin notifications to Supabase site_settings for cross-session persistence */
+async function persistToSupabase() {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    const notifs = getStored().slice(0, 200); // keep latest 200
+    await sb.from("site_settings").upsert({
+      setting_key: ADMIN_NOTIF_SETTINGS_KEY,
+      setting_value: JSON.stringify(notifs),
+      setting_type: "json",
+      description: "Admin notifications persisted across sessions",
+    }, { onConflict: "setting_key" });
+  } catch { /* best-effort */ }
+}
+
+/** Load admin notifications from Supabase as initial seed */
+export async function loadAdminNotificationsFromSupabase(): Promise<void> {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    const { data } = await sb
+      .from("site_settings")
+      .select("setting_value")
+      .eq("setting_key", ADMIN_NOTIF_SETTINGS_KEY)
+      .maybeSingle();
+    if (data?.setting_value) {
+      const remote: AdminNotification[] = JSON.parse(data.setting_value);
+      if (Array.isArray(remote) && remote.length > 0) {
+        // Merge: remote supersedes if local is empty
+        const local = getStored();
+        if (local.length === 0) {
+          setStored(remote);
+        }
+      }
+    }
+  } catch { /* best-effort */ }
+}
+
 // ── Public API ──
 
 export function createAdminNotification(
@@ -239,6 +283,9 @@ export function createAdminNotification(
   stored.unshift(notif);
   setStored(stored);
 
+  // Persist to Supabase for cross-session durability
+  persistToSupabase();
+
   // Also log to server
   fetch("/api/admin/notifications", {
     method: "POST",
@@ -267,6 +314,7 @@ export function markAdminRead(id: string) {
   if (found) {
     found.is_read = true;
     setStored(stored);
+    persistToSupabase();
   }
 }
 
@@ -277,6 +325,7 @@ export function markAdminUnread(id: string) {
     found.is_read = false;
     found.status = "pending";
     setStored(stored);
+    persistToSupabase();
   }
 }
 
@@ -287,6 +336,7 @@ export function markAsDone(id: string) {
     found.status = "done";
     found.is_read = true;
     setStored(stored);
+    persistToSupabase();
   }
 }
 
@@ -294,15 +344,18 @@ export function markAllAdminRead() {
   const stored = getStored();
   stored.forEach((n) => { n.is_read = true; n.status = "done"; });
   setStored(stored);
+  persistToSupabase();
 }
 
 export function deleteAdminNotification(id: string) {
   setStored(getStored().filter((n) => n.id !== id));
+  persistToSupabase();
 }
 
 export function deleteAdminNotifications(ids: string[]) {
   const idSet = new Set(ids);
   setStored(getStored().filter((n) => !idSet.has(n.id)));
+  persistToSupabase();
 }
 
 // ── Statistics ──

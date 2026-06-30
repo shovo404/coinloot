@@ -1,3 +1,5 @@
+import { getSupabaseClient } from "../lib/supabase";
+
 export interface LockedOfferwallConfig {
   providerName: string;
   title: string;
@@ -35,6 +37,30 @@ const PROMO_KEY = "coinloot_offerwall_promo_codes";
 const UNLOCK_KEY = "coinloot_user_unlocks";
 const LOCK_STATUS_KEY = "coinloot_offerwall_lock_status_map";
 
+// ── Supabase Persistence ──
+const LOCKED_OFFERWALL_SETTINGS_KEY = "locked_offerwall_system";
+
+async function persistLockSystemToSupabase() {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    const data = {
+      configs: getLockedOfferwallConfigs(),
+      promos: getOfferwallPromoCodes(),
+      lockStatus: getOfferwallLockStatusMap(),
+      unlockCodes: getOfferwallUnlockCodes(),
+      userUnlocks: getAllUserUnlocks(),
+      userUnlockedOfferwalls: getAllUserUnlockedOfferwalls(),
+    };
+    await sb.from("site_settings").upsert({
+      setting_key: LOCKED_OFFERWALL_SETTINGS_KEY,
+      setting_value: JSON.stringify(data),
+      setting_type: "json",
+      description: "Locked offerwall system data persisted across sessions",
+    }, { onConflict: "setting_key" });
+  } catch { /* best-effort */ };
+}
+
 // ── Per-Offerwall Lock Status ──
 
 export function getOfferwallLockStatusMap(): Record<string, boolean> {
@@ -69,6 +95,7 @@ export function getLockedOfferwallConfigs(): LockedOfferwallConfig[] {
 
 export function saveLockedOfferwallConfig(configs: LockedOfferwallConfig[]) {
   localStorage.setItem(CONFIG_KEY, JSON.stringify(configs));
+  persistLockSystemToSupabase();
 }
 
 export function getLockedOfferwallConfig(providerName: string): LockedOfferwallConfig | null {
@@ -97,6 +124,7 @@ export function getOfferwallPromoCodes(): OfferwallPromoCode[] {
 
 export function saveOfferwallPromoCodes(codes: OfferwallPromoCode[]) {
   localStorage.setItem(PROMO_KEY, JSON.stringify(codes));
+  persistLockSystemToSupabase();
 }
 
 export function addOfferwallPromoCode(code: OfferwallPromoCode) {

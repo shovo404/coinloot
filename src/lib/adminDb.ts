@@ -31,6 +31,8 @@ export interface HomepageSections {
   promo_cards: boolean;
   rewards: boolean;
   challenges: boolean;
+  social_bounty: boolean;
+  weekly_challenge: boolean;
 }
 
 export async function getHomepageSections(): Promise<HomepageSections> {
@@ -38,7 +40,7 @@ export async function getHomepageSections(): Promise<HomepageSections> {
   if (val) {
     try { return JSON.parse(val); } catch {}
   }
-  return { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true };
+  return { featured: true, hot: true, surveys: true, offerwalls: true, announcements: true, promo_cards: true, rewards: true, challenges: true, social_bounty: true, weekly_challenge: true };
 }
 
 export async function saveHomepageSections(sections: HomepageSections) {

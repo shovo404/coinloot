@@ -1,6 +1,8 @@
 import { useState, FormEvent } from "react";
 import { ShieldCheck, Eye, EyeOff } from "lucide-react";
 import Loader from "./Loader";
+import { getSupabaseClient } from "../lib/supabase";
+import { getProfile } from "../lib/supabaseService";
 
 interface AdminLoginProps {
   onLogin: (email: string) => void;
@@ -23,29 +25,65 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
     }
 
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
 
-    const emailTrimmed = email.toLowerCase().trim();
-    const passwordTrimmed = password;
+    try {
+      const sb = getSupabaseClient();
+      if (!sb) {
+        setError("Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+        setLoading(false);
+        return;
+      }
 
-    const accounts = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-    const match = accounts.find(
-      (a: any) => a.email === emailTrimmed && a.password === passwordTrimmed
-    );
+      const trimmedEmail = email.toLowerCase().trim();
 
-    if (match && match.profile.is_admin) {
-      onLogin(emailTrimmed);
-    } else if (match && !match.profile.is_admin) {
-      setError("Access denied. Admin privileges required.");
-    } else if (emailTrimmed === "admin@gmail.com" && passwordTrimmed === "admin123") {
-      onLogin(emailTrimmed);
-      localStorage.setItem("coinloot_accounts", JSON.stringify([
-        ...accounts.filter((a: any) => a.email !== "admin@gmail.com"),
-        { email: "admin@gmail.com", username: "Admin", password: "admin123", profile: { is_admin: true, username: "Admin" } }
-      ]));
-    } else {
-      setError("Invalid email or password. Please try again.");
+      // Sign in via Supabase Auth
+      const { data, error: signInError } = await sb.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (signInError) {
+        setError(signInError.message || "Invalid email or password.");
+        setLoading(false);
+        return;
+      }
+
+      if (!data?.user) {
+        setError("Authentication failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      // Check admin status from Supabase profiles table
+      const profile = await getProfile(data.user.id);
+      if (!profile) {
+        setError("Profile not found.");
+        setLoading(false);
+        return;
+      }
+
+      // Verify admin access via is_admin flag in Supabase
+      if (!profile.is_admin) {
+        // Also check admin_accounts table as fallback
+        const { data: adminAccount } = await sb
+          .from("admin_accounts")
+          .select("*")
+          .eq("user_id", data.user.id)
+          .maybeSingle();
+
+        if (!adminAccount) {
+          setError("Access denied. Admin privileges required.");
+          await sb.auth.signOut();
+          setLoading(false);
+          return;
+        }
+      }
+
+      onLogin(trimmedEmail);
+    } catch (err: any) {
+      setError(err?.message || "An unexpected error occurred. Please try again.");
     }
+
     setLoading(false);
   };
 

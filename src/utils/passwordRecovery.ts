@@ -3,6 +3,23 @@ import { getSupabaseClient } from "../lib/supabase";
 import { createAdminNotification } from "./adminNotifier";
 
 const RECOVERY_KEY = "coinloot_password_recovery_requests";
+const RECOVERY_SUPABASE_KEY = "password_recovery_requests";
+
+// ── Supabase Persistence ─────────────────────────────────────────────────
+
+async function persistRecoveryToSupabase() {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    const requests = getAllRequests().slice(0, 200);
+    await sb.from("site_settings").upsert({
+      setting_key: RECOVERY_SUPABASE_KEY,
+      setting_value: JSON.stringify(requests),
+      setting_type: "json",
+      description: "Password recovery requests persisted across sessions",
+    }, { onConflict: "setting_key" });
+  } catch { /* best-effort */ }
+}
 
 // ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -14,6 +31,7 @@ function getAllRequests(): PasswordRecoveryRequest[] {
 
 function saveAllRequests(requests: PasswordRecoveryRequest[]) {
   localStorage.setItem(RECOVERY_KEY, JSON.stringify(requests));
+  persistRecoveryToSupabase();
 }
 
 export function createRecoveryRequest(userId: string, username: string, email: string, reason: string): PasswordRecoveryRequest {

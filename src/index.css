@@ -331,6 +331,217 @@ html, body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   ENHANCED MOBILE RESPONSIVENESS — Fixes across all pages
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Fix horizontal scrolling on all pages */
+body, #root {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  /* Fix admin panel layout on mobile */
+  .grid-cols-1\\.5,
+  .grid-cols-2\\.5,
+  .lg\:grid-cols-2,
+  .lg\:grid-cols-3,
+  .lg\:grid-cols-4,
+  .lg\:grid-cols-5,
+  .lg\:grid-cols-6 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix earn page card grids */
+  .grid-cols-2,
+  .grid-cols-3,
+  .grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .grid-cols-5,
+  .grid-cols-6,
+  .grid-cols-7,
+  .grid-cols-8 {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  .grid-cols-1 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix withdrawal method cards */
+  .sm\:grid-cols-2,
+  .md\:grid-cols-3,
+  .xl\:grid-cols-3 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Fix offerwall provider grid */
+  .gap-6,
+  .gap-8 {
+    gap: 0.75rem !important;
+  }
+
+  /* Fix admin sidebar on mobile */
+  .lg\:w-64,
+  .lg\:w-72 {
+    width: 100% !important;
+  }
+  .lg\:sticky,
+  .lg\:fixed {
+    position: relative !important;
+  }
+
+  /* Fix leaderboard podium */
+  .grid-cols-3.max-w-2xl {
+    gap: 0.5rem !important;
+  }
+  .h-36,
+  .h-28,
+  .h-24 {
+    height: auto !important;
+    min-height: 80px !important;
+  }
+
+  /* Fix tables */
+  table,
+  .table-container {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    font-size: 8px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  th,
+  td {
+    white-space: nowrap;
+    padding: 4px 6px !important;
+  }
+
+  /* Fix modals */
+  .fixed.inset-0.z-50.flex.items-center.justify-center {
+    padding: 0.5rem !important;
+    align-items: flex-end !important;
+  }
+  .fixed.inset-0.z-50.flex.items-center.justify-center > div[class*="rounded-"] {
+    width: 100% !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    border-radius: 1.5rem 1.5rem 0 0 !important;
+    margin-top: auto;
+  }
+
+  /* Fix horizontal scroll in cards */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+  .overflow-x-auto > * {
+    scroll-snap-align: start;
+  }
+
+  /* Fix navbar dropdowns */
+  .glass-notification {
+    width: calc(100vw - 1rem) !important;
+    max-width: calc(100vw - 1rem) !important;
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+  }
+
+  /* Fix admin panel sections */
+  .p-4,  .p-5,  .p-6 {
+    padding: 0.75rem !important;
+  }
+  .px-4 {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+  .px-8 {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Fix referral page */
+  .max-w-7xl > .grid-cols-1.lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix support ticket page */
+  .max-w-4xl,  .max-w-3xl,  .max-w-2xl,  .max-w-5xl {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Fix security settings page */
+  .sm\:grid-cols-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix survey hub */
+  .snap-start.shrink-0 {
+    width: calc(100vw - 2rem) !important;
+    max-width: 300px;
+  }
+
+  /* Fix KYC page */
+  .sm\:grid-cols-2,  .grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+  .grid-cols-3.gap-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  /* Fix rewards store */
+  .lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix account settings page */
+  .md\:grid-cols-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Fix my profile page */
+  .sm\:grid-cols-2,  .lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Remove bottom nav padding from main content */
+  .pb-24 {
+    padding-bottom: 5rem !important;
+  }
+}
+
+/* Tablet fixes */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-cols-4,  .grid-cols-5,  .grid-cols-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .lg\:grid-cols-5,  .xl\:grid-cols-6 {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+  .p-8 {
+    padding: 1rem !important;
+  }
+}
+
+/* Very small screens (320px) */
+@media (max-width: 360px) {
+  .text-xs,  .text-sm {
+    font-size: 10px !important;
+  }
+  .gap-4 {
+    gap: 0.5rem !important;
+  }
+  .p-3,  .p-4,  .p-5 {
+    padding: 0.5rem !important;
+  }
+  .rounded-2xl,  .rounded-3xl {
+    border-radius: 0.75rem !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    LIGHT MODE SUPPORT
    ═══════════════════════════════════════════════════════════════════════ */
 

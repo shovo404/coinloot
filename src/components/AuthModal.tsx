@@ -6,19 +6,9 @@ import { getSupabaseClient } from "../lib/supabase";
 import { signUp, signIn, getProfile, getProfileByEmail, updateProfile, changeUserPassword } from "../lib/supabaseService";
 import { AVATAR_OPTIONS } from "../utils/avatarOptions";
 import { getDeviceFingerprint, fetchRegistrationInfo } from "../utils/registrationInfo";
-import PasswordRecoveryForm from "./PasswordRecoveryForm";
 
-interface StoredAccount { email: string; password: string; username: string; profile: UserProfile; }
-
-function saveToAccounts(email: string, password: string, username: string, profile: UserProfile) {
-  const existing = JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-  const idx = existing.findIndex((a: StoredAccount) => a.profile.id === profile.id);
-  const entry: StoredAccount = { email, password, username, profile };
-  if (idx >= 0) existing[idx] = entry;
-  else existing.push(entry);
-  localStorage.setItem("coinloot_accounts", JSON.stringify(existing));
-  window.dispatchEvent(new CustomEvent("user-registered"));
-}
+// In production, user accounts are managed entirely through Supabase Auth.
+// No plaintext passwords are stored in localStorage.
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -42,14 +32,10 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  // Forgot Password flow
-  const [forgotStep, setForgotStep] = useState<"email" | "otp" | "newPassword" | null>(null);
-  const [otp, setOtp] = useState("");
-  const [generatedOtp, setGeneratedOtp] = useState<string | null>(null);
-  const [otpExpiry, setOtpExpiry] = useState<number>(0);
+  // Forgot Password flow — uses Supabase Auth's built-in password reset (email with reset link)
+  // No client-side OTP generation. User receives a Supabase-managed email with a secure reset link.
+  const [forgotStep, setForgotStep] = useState<"email" | null>(null);
   const [forgotEmail, setForgotEmail] = useState("");
-  const [resetToken, setResetToken] = useState<string | null>(null);
-  const [otpCooldown, setOtpCooldown] = useState(0);
 
   // Attempt to restore session on mount
   useEffect(() => {
@@ -84,12 +70,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       setNewPassword("");
       setConfirmPassword("");
       setForgotStep(null);
-      setOtp("");
-      setGeneratedOtp(null);
-      setOtpExpiry(0);
       setForgotEmail("");
-      setResetToken(null);
-      setOtpCooldown(0);
     }
   }, [isOpen]);
 
@@ -128,46 +109,23 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
         return;
       }
 
-      let profile: UserProfile | null = null;
-      let signInSuccess = false;
-
-      // Try Supabase auth first
-      try {
-        const data = await signIn(trimmedEmail, password);
-        if (data?.user) {
-          profile = await getProfile(data.user.id);
-          if (profile) signInSuccess = true;
-        }
-      } catch (supabaseErr) {
-        // Supabase auth failed — try localStorage fallback
-      }
-
-      // Fallback: check localStorage accounts (needed for admin-reset passwords)
-      if (!signInSuccess) {
-        const accounts: Array<{ email: string; password: string; username: string; profile: UserProfile }> =
-          JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-        const account = accounts.find(
-          (a) => a.email === trimmedEmail && a.password === password
-        );
-        if (account) {
-          profile = account.profile;
-          signInSuccess = true;
-        }
-      }
-
-      if (!signInSuccess || !profile) {
+      // Sign in via Supabase Auth only (no localStorage fallback)      
+      const data = await signIn(trimmedEmail, password);
+      if (!data?.user) {
         setError("Invalid email or password. Please try again.");
         setLoading(false);
         return;
       }
 
-      saveToAccounts(trimmedEmail, password, profile.username, profile);
+      const profile = await getProfile(data.user.id);
+      if (!profile) {
+        setError("Profile not found. Please contact support.");
+        setLoading(false);
+        return;
+      }
 
       // Check if admin forced a password change
-      const storedAccounts: Array<{ email: string; password: string; username: string; profile: any }> =
-        JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-      const storedAccount = storedAccounts.find((a) => a.profile.id === profile!.id);
-      if (storedAccount?.profile?.force_password_change) {
+      if (profile.force_password_change) {
         setForceChange(true);
         setLoading(false);
         return;
@@ -198,34 +156,38 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
 
     setLoading(true);
     try {
-      const accounts: Array<{ email: string; password: string; username: string; profile: UserProfile }> =
-        JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-      const idx = accounts.findIndex((a) => a.email === email.trim().toLowerCase());
-      if (idx < 0) { setError("Account not found."); setLoading(false); return; }
+      const trimmedEmail = email.trim().toLowerCase();
+      
+      // Sign in to get current user ID (required for Supabase password change)
+      const authData = await signIn(trimmedEmail, password);
+      if (!authData?.user) {
+        setError("Session expired. Please try again.");
+        setLoading(false);
+        return;
+      }
 
-      const profile = accounts[idx].profile;
+      // Update password via Supabase Auth
+      await changeUserPassword(authData.user.id, newPassword);
 
-      // Update both Supabase and localStorage
-      await changeUserPassword(profile.id, newPassword);
-
-      // Reload profile to get updated profile
-      const freshProfile = await getProfile(profile.id);
-      const finalProfile = freshProfile || profile;
-
-      saveToAccounts(email.trim().toLowerCase(), newPassword, finalProfile.username, finalProfile);
-      setForceChange(false);
-      onLogin(finalProfile);
-      onClose();
+      // Reload profile
+      const freshProfile = await getProfile(authData.user.id);
+      if (freshProfile) {
+        setForceChange(false);
+        onLogin(freshProfile);
+        onClose();
+      } else {
+        setError("Failed to load profile. Please try signing in again.");
+        setLoading(false);
+      }
     } catch (err: any) {
       setError(err?.message || "Failed to change password. Please try again.");
     }
     setLoading(false);
   };
 
-  // ── Forgot Password ──
-
-  const EMAIL_OTP_KEY = "coinloot_password_reset_otp";
-  const EMAIL_RATE_KEY = "coinloot_password_reset_attempts";
+  // ── Forgot Password (Supabase Auth Flow) ──
+  // Uses Supabase's built-in password reset which sends a proper email with reset link.
+  // No localStorage-based OTP generation.
 
   const handleStartForgotPassword = () => {
     setError("");
@@ -236,42 +198,11 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
 
   const handleBackToSignIn = () => {
     setForgotStep(null);
-    setOtp("");
-    setGeneratedOtp(null);
-    setOtpExpiry(0);
-    setResetToken(null);
     setError("");
     setSuccessMsg("");
   };
 
-  const checkRateLimit = (email: string): boolean => {
-    try {
-      const attempts: Record<string, number[]> = JSON.parse(localStorage.getItem(EMAIL_RATE_KEY) || "{}");
-      const now = Date.now();
-      const userAttempts = (attempts[email] || []).filter(t => now - t < 3600000); // last 1 hour
-      if (userAttempts.length >= 3) {
-        const oldest = userAttempts[0];
-        const wait = Math.ceil((oldest + 3600000 - now) / 60000);
-        setError(`Too many attempts. Please wait ${wait} minute${wait > 1 ? "s" : ""}.`);
-        return false;
-      }
-      userAttempts.push(now);
-      attempts[email] = userAttempts;
-      localStorage.setItem(EMAIL_RATE_KEY, JSON.stringify(attempts));
-      return true;
-    } catch { return true; }
-  };
-
-  const accountExists = (email: string): { exists: boolean; account?: { email: string; password: string; username: string; profile: UserProfile } } => {
-    try {
-      const accounts: Array<{ email: string; password: string; username: string; profile: UserProfile }> =
-        JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-      const account = accounts.find(a => a.email === email);
-      return { exists: !!account, account };
-    } catch { return { exists: false }; }
-  };
-
-  const handleSendOtp = async () => {
+  const handleSendResetEmail = async () => {
     setError("");
     setSuccessMsg("");
 
@@ -281,178 +212,32 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       return;
     }
 
-    // Check if account exists in localStorage
-    const { exists, account } = accountExists(trimmedEmail);
-    if (!exists) {
-      // Try Supabase
-      try {
-        const sb = getSupabaseClient();
-        if (sb) {
-          const profile = await getProfileByEmail(trimmedEmail);
-          if (!profile) {
-            setError("No account found with this email address.");
-            return;
-          }
-        } else {
-          setError("No account found with this email address.");
-          return;
-        }
-      } catch {
-        setError("No account found with this email address.");
-        return;
-      }
-    }
-
-    // Rate limit check
-    if (!checkRateLimit(trimmedEmail)) return;
-
     setLoading(true);
 
     try {
-      // Generate 6-digit OTP
-      const otpValue = String(Math.floor(100000 + Math.random() * 900000));
-      const expiry = Date.now() + 600000; // 10 minutes
-
-      // Store OTP in localStorage
-      const otpData = { email: trimmedEmail, otp: otpValue, expiry, used: false };
-      localStorage.setItem(EMAIL_OTP_KEY, JSON.stringify(otpData));
-
-      setGeneratedOtp(otpValue);
-      setOtpExpiry(expiry);
-      setOtpCooldown(30);
-
-      // In production, this is where the email sending would happen.
-      // For demo, show OTP directly after a brief delay.
-      setSuccessMsg("A password reset code has been sent to your email.");
-
-      // Start cooldown timer
-      const timer = setInterval(() => {
-        setOtpCooldown(prev => {
-          if (prev <= 1) { clearInterval(timer); return 0; }
-          return prev - 1;
-        });
-      }, 1000);
-
-      // Simulate email delay, then move to OTP step
-      setTimeout(() => {
+      const sb = getSupabaseClient();
+      if (!sb) {
+        setError("Service unavailable. Please try again later.");
         setLoading(false);
-        setSuccessMsg(`Reset code sent to ${trimmedEmail}`);
-        setForgotStep("otp");
-        setResetToken(otpValue); // Store so backend can verify
-      }, 1500);
-
-    } catch (err: any) {
-      setError(err?.message || "Failed to send reset code. Please try again.");
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = () => {
-    setError("");
-
-    try {
-      const stored = localStorage.getItem(EMAIL_OTP_KEY);
-      if (!stored) {
-        setError("No reset code found. Please request a new one.");
         return;
       }
 
-      const otpData = JSON.parse(stored);
-      if (otpData.used) {
-        setError("This reset code has already been used.");
+      // Use Supabase's built-in password reset which sends a proper email
+      const { error } = await sb.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      });
+
+      if (error) {
+        setError(error.message || "Failed to send reset email. Please try again.");
+        setLoading(false);
         return;
       }
 
-      if (Date.now() > otpData.expiry) {
-        setError("Reset code has expired. Please request a new one.");
-        localStorage.removeItem(EMAIL_OTP_KEY);
-        return;
-      }
-
-      if (otp.trim() !== otpData.otp) {
-        setError("Invalid reset code. Please try again.");
-        return;
-      }
-
-      // Mark as used
-      otpData.used = true;
-      localStorage.setItem(EMAIL_OTP_KEY, JSON.stringify(otpData));
-
-      setSuccessMsg("Code verified! Please set your new password.");
-      setForgotStep("newPassword");
-    } catch {
-      setError("Failed to verify code. Please request a new one.");
-    }
-  };
-
-  const handleResendOtp = () => {
-    setOtp("");
-    setError("");
-    setSuccessMsg("");
-    setForgotStep("email");
-    // Re-trigger send
-    setTimeout(() => handleSendOtp(), 100);
-  };
-
-  const handleForgotNewPassword = async () => {
-    setError("");
-    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
-
-    const trimmedEmail = forgotEmail.trim().toLowerCase();
-    const { account } = accountExists(trimmedEmail);
-
-    if (!account) {
-      setError("Account not found.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Update password via changeUserPassword
-      await changeUserPassword(account.profile.id, newPassword);
-
-      // Update accounts list
-      const accounts: Array<{ email: string; password: string; username: string; profile: UserProfile }> =
-        JSON.parse(localStorage.getItem("coinloot_accounts") || "[]");
-      const idx = accounts.findIndex(a => a.email === trimmedEmail);
-      if (idx >= 0) {
-        accounts[idx].password = newPassword;
-        accounts[idx].profile.force_password_change = false;
-        localStorage.setItem("coinloot_accounts", JSON.stringify(accounts));
-      }
-
-      // Log the reset
-      try {
-        const logs = JSON.parse(localStorage.getItem("coinloot_admin_logs") || "[]");
-        logs.unshift({
-          id: `log-${Date.now()}`,
-          adminId: "self-service",
-          adminName: account.profile.username,
-          action: "PASSWORD_CHANGED",
-          targetType: "user",
-          targetId: account.profile.id,
-          details: "Password reset via forgot password flow",
-          timestamp: new Date().toISOString(),
-        });
-        localStorage.setItem("coinloot_admin_logs", JSON.stringify(logs.slice(0, 200)));
-      } catch {}
-
-      setLoading(false);
-      setSuccessMsg("");
+      setSuccessMsg("Password reset email sent! Check your inbox and spam folder for the reset link. You can close this window.");
       setForgotStep(null);
-      setOtp("");
-      setGeneratedOtp(null);
-      setOtpExpiry(0);
-      setResetToken(null);
-
-      // Auto-login with new password
-      const freshProfile = await getProfile(account.profile.id);
-      saveToAccounts(trimmedEmail, newPassword, account.profile.username, freshProfile || account.profile);
-      onLogin(freshProfile || account.profile);
-      onClose();
+      setLoading(false);
     } catch (err: any) {
-      setError(err?.message || "Failed to reset password. Please try again.");
+      setError(err?.message || "Failed to send reset email. Please try again.");
       setLoading(false);
     }
   };
@@ -502,7 +287,6 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
               updateProfile(profile.id, { avatar_url: avatarUrl }).catch(() => {});
               profile.avatar_url = avatarUrl;
             }
-            saveToAccounts(trimmedEmail, password, trimmedUsername, profile);
 
             // Notify admin of new registration
             try {
@@ -732,14 +516,14 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
             )}
 
             <button
-              onClick={handleSendOtp}
+              onClick={handleSendResetEmail}
               disabled={loading}
               className="w-full py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-xs tracking-wide shadow-lg shadow-cyan-500/10 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
-                <span className="flex items-center gap-2"><Loader size="xs" /> Sending Code...</span>
+                <span className="flex items-center gap-2"><Loader size="xs" /> Sending Reset Link...</span>
               ) : (
-                <span className="flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Send Reset Code</span>
+                <span className="flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> Send Reset Email</span>
               )}
             </button>
 
@@ -753,136 +537,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
           </div>
         )}
 
-        {/* Forgot Password — OTP Step */}
-        {forgotStep === "otp" && (
-          <div className="p-4 sm:p-6 space-y-4 animate-fade-in">
-            <div className="text-center">
-              <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-                <Mail className="w-5 h-5 text-cyan-400" />
-              </div>
-              <h2 className="font-sans font-bold text-sm text-white">Enter Reset Code</h2>
-              <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                A 6-digit code was sent to <strong className="text-white">{forgotEmail}</strong>
-              </p>
-            </div>
 
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-mono uppercase text-slate-400 font-semibold tracking-wider flex items-center gap-1.5">
-                <KeyRound className="w-3 h-3" /> Reset Code
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="000000"
-                className="w-full bg-slate-900 border border-white/5 focus:border-cyan-500/30 rounded-xl px-3.5 py-3 text-lg text-white text-center font-mono font-bold tracking-[8px] placeholder-slate-600 focus:outline-none transition-all"
-              />
-            </div>
-
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400 leading-relaxed text-center">{error}</div>
-            )}
-
-            <button
-              onClick={handleVerifyOtp}
-              disabled={otp.length !== 6}
-              className="w-full py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-bold text-xs tracking-wide shadow-lg shadow-cyan-500/10 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <CheckCircle className="w-3.5 h-3.5" /> Verify Code
-            </button>
-
-            <div className="flex items-center justify-center gap-1">
-              <span className="text-[10px] text-slate-500 font-mono">Didn't receive a code?</span>
-              {otpCooldown > 0 ? (
-                <span className="text-[10px] text-slate-600 font-mono">Resend in {otpCooldown}s</span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleResendOtp}
-                  className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold transition-colors cursor-pointer"
-                >
-                  Resend
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Forgot Password — New Password Step */}
-        {forgotStep === "newPassword" && (
-          <div className="p-4 sm:p-6 space-y-4 animate-fade-in">
-            <div className="text-center">
-              <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
-              </div>
-              <h2 className="font-sans font-bold text-sm text-white">Set New Password</h2>
-              <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                Choose a new password for your account.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-mono uppercase text-slate-400 font-semibold tracking-wider flex items-center gap-1.5">
-                <Lock className="w-3 h-3" /> New Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password (min. 6 chars)"
-                  className="w-full bg-slate-900 border border-white/5 focus:border-emerald-500/30 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-all pl-9 pr-9"
-                />
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-mono uppercase text-slate-400 font-semibold tracking-wider flex items-center gap-1.5">
-                <CheckCircle className="w-3 h-3" /> Confirm Password
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm new password"
-                className="w-full bg-slate-900 border border-white/5 focus:border-emerald-500/30 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-all"
-              />
-            </div>
-
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400 leading-relaxed text-center">{error}</div>
-            )}
-
-            <button
-              onClick={handleForgotNewPassword}
-              disabled={loading || !newPassword || !confirmPassword}
-              className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-600 text-white font-bold text-xs tracking-wide shadow-lg shadow-emerald-500/10 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2"><Loader size="xs" /> Resetting...</span>
-              ) : (
-                <span className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5" /> Reset Password</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleBackToSignIn}
-              className="w-full text-[10px] text-slate-500 hover:text-slate-300 font-mono transition-colors cursor-pointer"
-            >
-              Back to Sign In
-            </button>
-          </div>
-        )}
 
         {/* Form */}
         {!forceChange && !forgotStep && (

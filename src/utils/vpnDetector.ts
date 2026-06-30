@@ -1,3 +1,5 @@
+import { getSupabaseClient } from "../lib/supabase";
+
 export interface VpnCheckResult {
   isVpn: boolean;
   isProxy: boolean;
@@ -242,6 +244,10 @@ export function clearDetectionLogs() {
 }
 
 // ── Restriction Management ──
+// All restriction functions come in two flavors:
+//   1. Sync (default) — localStorage only, backward compatible for inline use
+//   2. Async (suffixed `Async`) — also syncs to Supabase profiles table for
+//      cross-device enforcement in production.
 
 interface RestrictionEntry {
   userId: string;
@@ -263,7 +269,39 @@ function saveRestrictionEntries(entries: RestrictionEntry[]) {
   localStorage.setItem("coinloot_restricted_users_v2", JSON.stringify(entries));
 }
 
-export function isUserRestricted(userId: string): {
+/** Async helper: sync restriction state to Supabase profiles table */
+async function supabaseSyncRestriction(userId: string, entry: RestrictionEntry | null) {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    if (entry === null) {
+      await sb.from("profiles").update({
+        status: "active", is_banned: false,
+        restriction_reason: null, restricted_at: null,
+        restricted_by: null, restriction_notes: null,
+      }).eq("id", userId);
+    } else if (entry.permanent) {
+      await sb.from("profiles").update({
+        status: "banned", is_banned: true,
+        restriction_reason: entry.reason,
+        restricted_at: entry.restrictedAt,
+        restricted_by: entry.restrictedBy,
+        restriction_notes: entry.notes,
+      }).eq("id", userId);
+    } else {
+      await sb.from("profiles").update({
+        status: "restricted", is_banned: false,
+        restriction_reason: entry.reason,
+        restricted_at: entry.restrictedAt,
+        restricted_by: entry.restrictedBy,
+        restriction_notes: entry.notes,
+        restricted_until: entry.restrictedUntil,
+      }).eq("id", userId);
+    }
+  } catch { /* best-effort */ }
+}
+
+export interface RestrictionResult {
   restricted: boolean;
   until: string | null;
   remaining: string;
@@ -272,7 +310,11 @@ export function isUserRestricted(userId: string): {
   minutes: number;
   seconds: number;
   reason: string;
-} {
+}
+
+// ── Sync versions (localStorage only, backward compatible) ──
+
+export function isUserRestricted(userId: string): RestrictionResult {
   try {
     const entries = getRestrictionEntries();
     const entry = entries.find((r) => r.userId === userId);
@@ -312,19 +354,17 @@ export function restrictUser(
     const entry: RestrictionEntry = {
       userId,
       restrictedUntil: new Date(Date.now() + durationMinutes * 60000).toISOString(),
-      reason,
-      notes,
+      reason, notes,
       restrictedAt: new Date().toISOString(),
       restrictedBy: adminName,
       permanent: false,
     };
-    if (existing >= 0) {
-      entries[existing] = entry;
-    } else {
-      entries.push(entry);
-    }
+    if (existing >= 0) entries[existing] = entry;
+    else entries.push(entry);
     saveRestrictionEntries(entries);
     updateUserProfileStatus(userId, "restricted");
+    // Fire-and-forget Supabase sync
+    supabaseSyncRestriction(userId, entry);
   } catch { /* */ }
 }
 
@@ -338,21 +378,15 @@ export function banUser(
     const entries = getRestrictionEntries();
     const existing = entries.findIndex((r) => r.userId === userId);
     const entry: RestrictionEntry = {
-      userId,
-      restrictedUntil: "",
-      reason,
-      notes,
+      userId, restrictedUntil: "", reason, notes,
       restrictedAt: new Date().toISOString(),
-      restrictedBy: adminName,
-      permanent: true,
+      restrictedBy: adminName, permanent: true,
     };
-    if (existing >= 0) {
-      entries[existing] = entry;
-    } else {
-      entries.push(entry);
-    }
+    if (existing >= 0) entries[existing] = entry;
+    else entries.push(entry);
     saveRestrictionEntries(entries);
     updateUserProfileStatus(userId, "banned");
+    supabaseSyncRestriction(userId, entry);
   } catch { /* */ }
 }
 
@@ -361,6 +395,7 @@ export function unRestrictUser(userId: string) {
     const entries = getRestrictionEntries();
     saveRestrictionEntries(entries.filter((r) => r.userId !== userId));
     updateUserProfileStatus(userId, "active");
+    supabaseSyncRestriction(userId, null);
   } catch { /* */ }
 }
 
@@ -394,6 +429,7 @@ export function extendRestriction(userId: string, additionalMinutes: number) {
     const base = current > Date.now() ? current : Date.now();
     entries[idx].restrictedUntil = new Date(base + additionalMinutes * 60000).toISOString();
     saveRestrictionEntries(entries);
+    supabaseSyncRestriction(userId, entries[idx]);
   } catch { /* */ }
 }
 
@@ -417,6 +453,62 @@ function updateUserProfileStatus(userId: string, status: "active" | "restricted"
       }
     }
   } catch { /* */ }
+}
+
+// ── Async versions (also sync to Supabase) ──
+
+export async function isUserRestrictedAsync(userId: string): Promise<RestrictionResult> {
+  const sb = getSupabaseClient();
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from("profiles")
+        .select("status, is_banned, restriction_reason")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!error && data) {
+        if (data.status === "banned" || data.is_banned) {
+          return { restricted: true, until: null, remaining: "Permanent", days: 0, hours: 0, minutes: 0, seconds: 0, reason: data.restriction_reason || "Banned" };
+        }
+        if (data.status === "restricted") {
+          return { restricted: true, until: null, remaining: "Restricted", days: 0, hours: 0, minutes: 0, seconds: 0, reason: data.restriction_reason || "Restricted" };
+        }
+      }
+    } catch { /* fall through */ }
+  }
+  return isUserRestricted(userId);
+}
+
+export async function restrictUserAsync(userId: string, durationMinutes: number, reason: string, adminName: string = "Admin", notes: string = "") {
+  restrictUser(userId, durationMinutes, reason, adminName, notes);
+}
+
+export async function banUserAsync(userId: string, reason: string, adminName: string = "Admin", notes: string = "") {
+  banUser(userId, reason, adminName, notes);
+}
+
+export async function getRestrictedUsersAsync(): Promise<{ userId: string; restrictedUntil: string; reason: string; permanent: boolean; restrictedBy: string; restrictedAt: string; notes: string }[]> {
+  const sb = getSupabaseClient();
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from("profiles")
+        .select("id, status, is_banned, restriction_reason, restricted_at, restricted_by, restriction_notes, restricted_until")
+        .or("status.eq.restricted,status.eq.banned,is_banned.eq.true");
+      if (!error && data && data.length > 0) {
+        return data.map((p: any) => ({
+          userId: p.id,
+          restrictedUntil: p.restricted_until || "",
+          reason: p.restriction_reason || "",
+          permanent: p.status === "banned" || p.is_banned,
+          restrictedBy: p.restricted_by || "System",
+          restrictedAt: p.restricted_at || "",
+          notes: p.restriction_notes || "",
+        }));
+      }
+    } catch { /* fall through */ }
+  }
+  return getRestrictedUsers();
 }
 
 // ── Restriction History ──
@@ -448,8 +540,8 @@ export function getVpnDetectionCount(userId: string): number {
 
 export interface AutoRestrictRules {
   enabled: boolean;
-  threshold: number; // number of detections before auto-restrict
-  durationMinutes: number; // restriction duration in minutes
+  threshold: number;
+  durationMinutes: number;
 }
 
 const AUTO_RESTRICT_KEY = "coinloot_auto_restrict_rules";
@@ -459,7 +551,7 @@ export function getAutoRestrictRules(): AutoRestrictRules {
     const saved = localStorage.getItem(AUTO_RESTRICT_KEY);
     if (saved) return JSON.parse(saved);
   } catch { /* */ }
-  return { enabled: false, threshold: 3, durationMinutes: 1440 }; // disabled by default
+  return { enabled: false, threshold: 3, durationMinutes: 1440 };
 }
 
 export function saveAutoRestrictRules(rules: AutoRestrictRules) {
@@ -471,14 +563,12 @@ export function checkAutoRestrict(userId: string, username: string, adminName: s
   if (!rules.enabled) return false;
   const count = getVpnDetectionCount(userId);
   if (count >= rules.threshold) {
-    // Check if already restricted
     const existing = isUserRestricted(userId);
     if (!existing.restricted) {
       restrictUser(userId, rules.durationMinutes, `Auto-restricted: ${count} VPN detections`, adminName, `Automatic restriction after ${count} VPN detections`);
       logRestrictionHistory({
         id: `rh-${Date.now()}`,
-        userId,
-        username,
+        userId, username,
         action: "restricted",
         duration: rules.durationMinutes,
         reason: `Auto-restricted after ${count} VPN detections`,
