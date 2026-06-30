@@ -9,7 +9,7 @@ import {
 import Loader from "./Loader";
 import { UserProfile, Offer } from "../types";
 import { isUserRestricted, checkVpnStatus, getVpnSettings, logDetection } from "../utils/vpnDetector";
-import { getActiveCampaigns, getCampaignWithTasks, getUserCampaignSubmissions, submitCampaign } from "../lib/supabaseService";
+import { getCampaignWithTasks, getUserCampaignSubmissions, submitCampaign } from "../lib/supabaseService";
 import { getProviderInfo, getProviderLogoUrl, getAllProviders } from "../utils/providerLogos";
 import { getFeaturedOffers, getHotOffers } from "../utils/offerData";
 import OfferwallCard from "./OfferwallCard";
@@ -121,7 +121,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
     );
   }, [user.id, user.total_earned_coins, lockedUnlockTick, adminOffers]);
 
-  const [socialCampaigns, setSocialCampaigns] = useState<any[]>([]);
+  const socialCampaigns = state.campaigns || [];
   const [campaignSubmissions, setCampaignSubmissions] = useState<Record<string, any[]>>({});
   const [campaignModal, setCampaignModal] = useState<any>(null);
   const [campaignModalTasks, setCampaignModalTasks] = useState<any[]>([]);
@@ -133,6 +133,8 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
 
   // ── Locked Offers per-offer success state ──
   const [lockedOfferUnlocked, setLockedOfferUnlocked] = useState<Record<string, boolean>>({});
+
+  // Campaigns come from useAppRealtimeState context (loaded via Realtime subscription + custom events)
 
   // ── Locked Offers (individual locked admin offers) ──
   const lockedOffers = useMemo(() => {
@@ -166,9 +168,7 @@ export default function EarnPage({ user, setUser, onRewardEarned, simulationCoun
     ref.current.scrollBy({ left: direction === "left" ? -scrollAmount : scrollAmount, behavior: "smooth" });
   };
 
-  useEffect(() => {
-    getActiveCampaigns().then(setSocialCampaigns);
-  }, []);
+  // Campaigns loaded by AppRealtimeProvider on mount via loadAllState()
 
   const handleLockedUnlocked = (providerName: string) => {
     setLockedUnlockTick((t) => t + 1);

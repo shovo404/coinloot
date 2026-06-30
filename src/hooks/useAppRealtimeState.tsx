@@ -12,6 +12,7 @@ import {
   SocialBountyConfig, WeeklyChallengeConfig,
   defaultSocialBounty, defaultWeeklyChallenge,
 } from "../lib/adminDb";
+import { getActiveCampaigns } from "../lib/supabaseService";
 
 // ─── App Real-time State ─────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export interface AppRealtimeState {
   announcements: any[];
   offers: any[];
   promoCodes: any[];
+  campaigns: any[];
   loading: boolean;
 }
 
@@ -46,6 +48,7 @@ const defaultState: AppRealtimeState = {
   announcements: [],
   offers: [],
   promoCodes: [],
+  campaigns: [],
   loading: true,
 };
 
@@ -66,7 +69,7 @@ export function useAppRealtimeState() {
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 async function loadAllState(): Promise<AppRealtimeState> {
-  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications, announcements, offers, promoCodes] =
+  const [homepageSections, developerMode, maintenanceMode, globalPromo, lockRules, rewardsConfig, vpnSettings, systemNotifications, announcements, offers, promoCodes, campaigns] =
     await Promise.all([
       getHomepageSections(),
       getDeveloperMode(),
@@ -79,6 +82,7 @@ async function loadAllState(): Promise<AppRealtimeState> {
       getActiveAnnouncements().catch(() => []),
       getOffers(),
       getPromoCodes(),
+      getActiveCampaigns().catch(() => []),
     ]);
 
   return {
@@ -95,6 +99,7 @@ async function loadAllState(): Promise<AppRealtimeState> {
     announcements,
     offers,
     promoCodes,
+    campaigns,
     loading: false,
   };
 }
@@ -216,6 +221,36 @@ export function AppRealtimeProvider({ children }: { children: React.ReactNode })
     };
     window.addEventListener("restriction-changed", handler);
     return () => window.removeEventListener("restriction-changed", handler);
+  }, []);
+
+  // Listen for campaigns-changed custom event
+  useEffect(() => {
+    const handler = async () => {
+      const campaigns = await getActiveCampaigns().catch(() => []);
+      setState(prev => ({ ...prev, campaigns }));
+    };
+    window.addEventListener("campaigns-changed", handler);
+    return () => window.removeEventListener("campaigns-changed", handler);
+  }, []);
+
+  // Subscribe to real-time social_campaigns changes
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    const channel = sb.channel("campaigns-realtime")
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "social_campaigns" },
+        async () => {
+          const campaigns = await getActiveCampaigns().catch(() => []);
+          setState(prev => ({ ...prev, campaigns }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
   }, []);
 
   // Periodic refresh as safety net

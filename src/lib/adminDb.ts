@@ -638,6 +638,7 @@ export async function createCampaign(campaign: Partial<SocialCampaign>) {
     created_by: user?.id,
   });
   if (error) throw error;
+  window.dispatchEvent(new CustomEvent("campaigns-changed"));
 }
 
 export async function updateCampaign(id: string, updates: Partial<SocialCampaign>) {
@@ -645,6 +646,7 @@ export async function updateCampaign(id: string, updates: Partial<SocialCampaign
   if (!sb) throw new Error("Supabase client not available");
   const { error } = await sb.from("social_campaigns").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
+  window.dispatchEvent(new CustomEvent("campaigns-changed"));
 }
 
 export async function deleteCampaign(id: string) {
@@ -652,6 +654,7 @@ export async function deleteCampaign(id: string) {
   if (!sb) throw new Error("Supabase client not available");
   const { error } = await sb.from("social_campaigns").delete().eq("id", id);
   if (error) throw error;
+  window.dispatchEvent(new CustomEvent("campaigns-changed"));
 }
 
 export async function getCampaignTasks(campaignId: string): Promise<CampaignTask[]> {
